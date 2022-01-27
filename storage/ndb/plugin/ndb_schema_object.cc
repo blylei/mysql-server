@@ -134,8 +134,10 @@ NDB_SCHEMA_OBJECT::~NDB_SCHEMA_OBJECT() {
   assert(state.m_use_count == 0);
   // Check that all participants have completed
   assert(state.m_participants.size() == count_completed_participants());
-  // Coordinator should have completed
-  assert(state.m_coordinator_completed);
+  // Check that the coordinator completed all its operaion, when the schema
+  // operation is received by the coordinator.
+  assert(state.m_coordinator_completed ||
+         state.m_schema_obj_state != state.coord_receive_event);
 }
 
 NDB_SCHEMA_OBJECT *NDB_SCHEMA_OBJECT::get(const char *db,
@@ -274,6 +276,8 @@ std::string NDB_SCHEMA_OBJECT::to_string(const char *line_separator) const {
     }
     ss << "  ]," << line_separator;
     ss << "  coordinator_completed: " << state.m_coordinator_completed << ", "
+       << line_separator;
+    ss << "  m_schema_obj_state: " << state.m_schema_obj_state << ", "
        << line_separator;
   }
   ss << "}";
@@ -460,6 +464,28 @@ bool NDB_SCHEMA_OBJECT::check_coordinator_completed() const {
 
   state.m_coordinator_completed = true;
   return true;
+}
+
+bool NDB_SCHEMA_OBJECT::set_coordinator_received_schema_op() {
+  std::lock_guard<std::mutex> lock_state(state.m_lock);
+  if (state.m_schema_obj_state != state.client_timedout) {
+    ndbcluster::ndbrequire(state.m_schema_obj_state == state.init);
+    state.m_schema_obj_state = state.coord_receive_event;
+    return true;
+  }
+  return false;
+}
+
+bool NDB_SCHEMA_OBJECT::has_coordinator_received_schema_op() const {
+  std::unique_lock<std::mutex> lock_state(state.m_lock);
+  if (state.m_schema_obj_state != state.coord_receive_event) {
+    // There should be no participants since they're only registered by the
+    // coordinator when it receives the schema operation.
+    ndbcluster::ndbrequire(state.m_participants.size() == 0);
+    state.m_schema_obj_state = state.client_timedout;
+    return false;  // Schema operation not received
+  }
+  return true;  // Schema operation received
 }
 
 bool NDB_SCHEMA_OBJECT::client_wait_completed(uint max_wait_seconds) const {

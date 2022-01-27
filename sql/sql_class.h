@@ -63,6 +63,7 @@
 #include "my_sys.h"
 #include "my_table_map.h"
 #include "my_thread_local.h"
+#include "my_time_t.h"
 #include "mysql/components/services/bits/psi_bits.h"
 #include "mysql/components/services/my_thread_bits.h"
 #include "mysql/components/services/mysql_cond_bits.h"
@@ -211,6 +212,129 @@ void thd_set_psi(THD *thd, PSI_thread *psi);
   terminology_use_previous::enum_compatibility_version.
 */
 extern "C" unsigned int thd_get_current_thd_terminology_use_previous();
+
+enum enum_mem_cnt_mode {
+  /**
+    Memory counter object doesn't update global memory counter and doesn't throw
+    OOM error.
+  */
+  MEM_CNT_DEFAULT = 0U,
+  /**
+    if MEM_CNT_UPDATE_GLOBAL_COUNTER is set, memory counter object updates
+    global memory counter.
+  */
+  MEM_CNT_UPDATE_GLOBAL_COUNTER = (1U << 0),
+  /**
+  if MEM_CNT_GENERATE_ERROR is set, memory counter object generates OOM error if
+  any.
+*/
+  MEM_CNT_GENERATE_ERROR = (1U << 1),
+  /**
+  if MEM_CNT_GENERATE_LOG_ERROR is set, memory counter object generates OOM
+  error to error log if any.
+*/
+  MEM_CNT_GENERATE_LOG_ERROR = (1U << 2)
+};
+
+class Thd_mem_cnt {
+ public:
+  Thd_mem_cnt() = default;
+  virtual ~Thd_mem_cnt() = default;
+  virtual bool alloc_cnt(size_t size) = 0;
+  virtual void free_cnt(size_t size) = 0;
+  virtual int reset() = 0;
+  virtual void flush() = 0;
+  virtual void restore_mode() = 0;
+  virtual void no_error_mode() = 0;
+  virtual void set_curr_mode(uint mode_arg) = 0;
+  virtual void set_orig_mode(uint mode_arg) = 0;
+  virtual bool is_error() = 0;
+  virtual void set_thd_error_status() = 0;
+};
+
+class Thd_mem_cnt_noop : public Thd_mem_cnt {
+ public:
+  bool alloc_cnt(size_t) override { return false; }
+  void free_cnt(size_t) override {}
+  int reset() override { return 0; }
+  void flush() override {}
+  void restore_mode() override {}
+  void no_error_mode() override {}
+  void set_curr_mode(uint) override {}
+  void set_orig_mode(uint) override {}
+  bool is_error() override { return false; }
+  void set_thd_error_status() override {}
+};
+
+class Thd_mem_cnt_conn : public Thd_mem_cnt {
+  THD *m_thd;                       // Pointer to THD object.
+  Diagnostics_area m_da{false};     // Diagnostics area.
+  ulonglong mem_counter{0};         // Amount of memory consumed by thread.
+  ulonglong max_conn_mem{0};        // Max amount memory consumed by thread.
+  ulonglong glob_mem_counter{0};    // Amount of memory added to global
+                                    // memory counter.
+  uint curr_mode{MEM_CNT_DEFAULT};  // Current memory counter mode.
+  uint orig_mode{MEM_CNT_DEFAULT};  // Original memory counter mode
+                                    // (sets at init_mode() stage).
+  bool is_connection_stage{true};   // True on connection stage,
+                                    // resets to false after successful
+                                    // connection.
+ public:
+  Thd_mem_cnt_conn(THD *thd_arg) : m_thd(thd_arg) {}
+  ~Thd_mem_cnt_conn() override {
+    assert(mem_counter == 0 && glob_mem_counter == 0);
+  }
+  bool alloc_cnt(size_t size) override;
+  void free_cnt(size_t size) override;
+  int reset() override;
+  void flush() override;
+  /**
+    Restore original memory counter mode.
+  */
+  void restore_mode() override { curr_mode = orig_mode; }
+  /**
+    Set NO ERROR memory counter mode.
+  */
+  void no_error_mode() override {
+    curr_mode &= ~(MEM_CNT_GENERATE_ERROR | MEM_CNT_GENERATE_LOG_ERROR);
+  }
+  /**
+     Function sets current memory counter mode.
+
+     @param mode_arg         current memory counter mode.
+  */
+  void set_curr_mode(uint mode_arg) override { curr_mode = mode_arg; }
+  /**
+     Function sets original memory counter mode.
+
+     @param mode_arg         original memory counter mode.
+  */
+  void set_orig_mode(uint mode_arg) override { orig_mode = mode_arg; }
+  /**
+    Check if memory counter error is issued.
+
+    @retval true if memory counter error is issued, false otherwise.
+  */
+  bool is_error() override { return m_da.is_error(); }
+  void set_thd_error_status() override;
+
+ private:
+  int generate_error(int err_no, ulonglong mem_limit, ulonglong mem_size);
+  /**
+    Check if memory counter is in error mode.
+
+    @retval true if memory counter is in error mode, false otherwise.
+  */
+  bool is_error_mode() const { return (curr_mode & MEM_CNT_GENERATE_ERROR); }
+  /**
+    Check if memory counter is in error log  mode.
+
+    @retval true if memory counter is in error log mode, false otherwise.
+  */
+  bool is_error_log_mode() const {
+    return (curr_mode & MEM_CNT_GENERATE_LOG_ERROR);
+  }
+};
 
 /**
   the struct aggregates two paramenters that identify an event
@@ -1077,6 +1201,12 @@ class THD : public MDL_context_owner,
   mysql_mutex_t LOCK_thd_protocol;
 
   /**
+    Protects THD::m_security_ctx from inspection (e.g. by old-style
+    SHOW PROCESSLIST) while COM_CHANGE_USER changes the context.
+  */
+  mysql_mutex_t LOCK_thd_security_ctx;
+
+  /**
     Protects query plan (SELECT/UPDATE/DELETE's) from being freed/changed
     while another thread explains it. Following structures are protected by
     this mutex:
@@ -1389,7 +1519,26 @@ class THD : public MDL_context_owner,
   uint16 peer_port;
   struct timeval start_time;
   struct timeval user_time;
-  ulonglong start_utime, utime_after_lock;
+  /**
+    Query start time, expressed in microseconds.
+  */
+  ulonglong start_utime;
+
+ private:
+  /**
+    Time spent waiting for TABLE locks and DATA locks.
+    Expressed in microseconds.
+  */
+  ulonglong m_lock_usec;
+
+ public:
+  ulonglong get_lock_usec() { return m_lock_usec; }
+  void inc_lock_usec(ulonglong usec);
+  void push_lock_usec(ulonglong &top) {
+    top = m_lock_usec;
+    m_lock_usec = 0;
+  }
+  void pop_lock_usec(ulonglong top) { m_lock_usec = top; }
 
   /**
     Type of lock to be used for all DML statements, except INSERT, in cases
@@ -2622,11 +2771,56 @@ class THD : public MDL_context_owner,
   ~THD() override;
 
   void release_resources();
-  bool release_resources_done() const { return m_release_resources_done; }
+  /**
+    @returns true if THD resources are released.
+  */
+  bool release_resources_done() const;
+  /**
+    Check if THD is being disposed (i.e. m_thd_life_cycle_stage >=
+    SCHEDULED_FOR_DISPOSAL)
+
+    Non-owner thread should acquire LOCK_thd_data to check THD state without
+    getting into races.
+
+    @returns true of THD is being disposed.
+  */
+  bool is_being_disposed() const;
 
  private:
-  bool m_release_resources_done;
-  bool cleanup_done;
+  /**
+    Represents life cycle stages of THD instance.
+    Stage transition in THD clean up:
+     1. ACTIVE -> ACTIVE_AND_CLEAN
+
+    Stage transition in THD disposal:
+     1. ACTIVE -> SCHEDULED_FOR_DISPOSAL -> CLEANED_UP -> RESOURCES_RELEASED
+                                                             -> DISPOSED.
+     2. ACTIVE_AND_CLEAN -> CLEANED_UP -> RESOURCES_RELEASED -> DISPOSED.
+  */
+  enum enum_thd_life_cycle_stages {
+    ACTIVE = 0,
+    ACTIVE_AND_CLEAN,
+    SCHEDULED_FOR_DISPOSAL,
+    CLEANED_UP,
+    RESOURCES_RELEASED,
+    DISPOSED
+  };
+  enum_thd_life_cycle_stages m_thd_life_cycle_stage{
+      enum_thd_life_cycle_stages::ACTIVE};
+
+  /**
+    Set THD in ACTIVE life stage to disposal stage.
+
+    To avoid race conditions with non-owner thread checking THD disposal state,
+    LOCK_thd_data should be acquired before changing THD stage to disposal
+    stage.
+  */
+  void start_disposal();
+
+  /**
+    @returns true if THD is cleaned up.
+  */
+  bool is_cleanup_done();
   void cleanup(void);
 
   void init(void);
@@ -2817,13 +3011,12 @@ class THD : public MDL_context_owner,
     return variables.time_zone;
   }
   time_t query_start_in_secs() const { return start_time.tv_sec; }
-  timeval query_start_timeval_trunc(uint decimals);
+  my_timeval query_start_timeval_trunc(uint decimals);
   void set_time();
   void set_time(const struct timeval *t) {
     user_time = *t;
     set_time();
   }
-  void set_time_after_lock();
   inline bool is_fsp_truncate_mode() const {
     return (variables.sql_mode & MODE_TIME_TRUNCATE_FRACTIONAL);
   }
@@ -3859,8 +4052,8 @@ class THD : public MDL_context_owner,
     Set query to be displayed in performance schema (threads table etc.). Also
     mark the query safe to display for information_schema.process_list.
   */
-  void set_query_for_display(const char *query_arg MY_ATTRIBUTE((unused)),
-                             size_t query_length_arg MY_ATTRIBUTE((unused))) {
+  void set_query_for_display(const char *query_arg [[maybe_unused]],
+                             size_t query_length_arg [[maybe_unused]]) {
     // Set in pfs events statements table
     MYSQL_SET_STATEMENT_TEXT(m_statement_psi, query_arg,
                              static_cast<uint>(query_length_arg));
@@ -4417,6 +4610,23 @@ class THD : public MDL_context_owner,
     @param thd parent session
   */
   void copy_table_access_properties(THD *thd);
+  mysql_mutex_t LOCK_group_replication_connection_mutex;
+  mysql_cond_t COND_group_replication_connection_cond_var;
+
+  Thd_mem_cnt *mem_cnt;
+  bool enable_mem_cnt();
+  void disable_mem_cnt();
+
+#ifndef NDEBUG
+  const char *current_key_name;
+  ulonglong conn_mem_alloc_number;
+  bool is_mem_cnt_error_issued;
+  bool is_mem_cnt_error() {
+    return (is_error() &&
+            (get_stmt_da()->mysql_errno() == ER_DA_GLOBAL_CONN_LIMIT ||
+             get_stmt_da()->mysql_errno() == ER_DA_CONN_LIMIT));
+  }
+#endif
 };
 
 /**

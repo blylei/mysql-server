@@ -298,7 +298,7 @@ spinning.
 @param[in]	line		line where requested
 @return true if success */
 static inline bool rw_lock_s_lock_low(rw_lock_t *lock,
-                                      ulint pass MY_ATTRIBUTE((unused)),
+                                      ulint pass [[maybe_unused]],
                                       const char *file_name, ulint line);
 
 /** NOTE! Use the corresponding macro, not directly this function, except if
@@ -467,18 +467,16 @@ owns RW_LOCK_X only, the rw_lock_own(..,RW_LOCK_S) will return false.
 @param[in]  lock_type   The exact lock type to check:
                         RW_LOCK_S, RW_LOCK_SX or RW_LOCK_X
  */
-bool rw_lock_own(const rw_lock_t *lock, ulint lock_type)
-    MY_ATTRIBUTE((warn_unused_result));
+[[nodiscard]] bool rw_lock_own(const rw_lock_t *lock, ulint lock_type);
 
 /** Checks if the thread has locked the rw-lock in the specified mode, with
  the pass value == 0. */
-bool rw_lock_own_flagged(
-    const rw_lock_t *lock, /*!< in: rw-lock */
-    rw_lock_flags_t flags) /*!< in: specify lock types with
+[[nodiscard]] bool rw_lock_own_flagged(
+    const rw_lock_t *lock,  /*!< in: rw-lock */
+    rw_lock_flags_t flags); /*!< in: specify lock types with
                            OR of the rw_lock_flag_t values */
-    MY_ATTRIBUTE((warn_unused_result));
-#endif /* UNIV_DEBUG */
-#endif /* !UNIV_HOTBACKUP */
+#endif                      /* UNIV_DEBUG */
+#endif                      /* !UNIV_HOTBACKUP */
 /** Checks if somebody has locked the rw-lock in the specified mode.
  @return true if locked */
 bool rw_lock_is_locked(rw_lock_t *lock,  /*!< in: rw-lock */
@@ -558,12 +556,6 @@ struct rw_lock_t
   reset in x_unlock functions before incrementing the lock_word */
   std::atomic<bool> recursive;
 
-  /** This is TRUE if the writer field is RW_LOCK_X_WAIT; this field
-  is located far from the memory update hotspot fields which are at
-  the start of this struct, thus we can peek this field without
-  causing much memory bus traffic */
-  bool writer_is_wait_ex;
-
   /** number of granted SX locks. */
   volatile ulint sx_recursive;
 
@@ -635,6 +627,15 @@ struct rw_lock_t
   /** Level in the global latching order. */
   latch_level_t level;
 #endif /* UNIV_DEBUG */
+
+  /** Checks if there is a thread requesting an x-latch waiting for threads to
+  release their s-latches.
+  @return true iff there is an x-latcher blocked by s-latchers. */
+  bool is_x_blocked_by_s() {
+    const auto snapshot = lock_word.load();
+    return snapshot < 0 && -X_LOCK_DECR < snapshot &&
+           snapshot != -X_LOCK_HALF_DECR;
+  }
 };
 
 #ifndef UNIV_LIBRARY

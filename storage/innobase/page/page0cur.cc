@@ -57,7 +57,7 @@ static ulint page_cur_short_succ = 0;
  being used are:
  X[n+1] = (a * X[n] + c) mod m
  where:
- X[0] = ut_time_monotonic_us()
+ X[0] = number based on std::chrono::steady_clock::now()
  a = 1103515245 (3^5 * 5 * 7 * 129749)
  c = 12345 (3 * 5 * 823)
  m = 18446744073709551616 (2^64)
@@ -70,7 +70,10 @@ static ib_uint64_t page_cur_lcg_prng(void) {
   static ibool initialized = FALSE;
 
   if (!initialized) {
-    lcg_current = (ib_uint64_t)ut_time_monotonic_us();
+    lcg_current = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::steady_clock::now() -
+                      std::chrono::steady_clock::time_point{})
+                      .count();
     initialized = TRUE;
   }
 
@@ -1134,13 +1137,14 @@ byte *page_cur_parse_insert_rec(
   if (mismatch_index + end_seg_len < sizeof buf1) {
     buf = buf1;
   } else {
-    buf = static_cast<byte *>(ut_malloc_nokey(mismatch_index + end_seg_len));
+    buf = static_cast<byte *>(ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY,
+                                                 mismatch_index + end_seg_len));
   }
 
   /* Build the inserted record to buf */
 
   if (UNIV_UNLIKELY(mismatch_index >= UNIV_PAGE_SIZE)) {
-    ib::fatal(ER_IB_MSG_859)
+    ib::fatal(UT_LOCATION_HERE, ER_IB_MSG_859)
         << "is_short " << is_short << ", "
         << "info_and_status_bits " << info_and_status_bits << ", offset "
         << page_offset(cursor_rec)
@@ -1171,7 +1175,7 @@ byte *page_cur_parse_insert_rec(
   }
 
   if (buf != buf1) {
-    ut_free(buf);
+    ut::free(buf);
   }
 
   if (UNIV_LIKELY_NULL(heap)) {

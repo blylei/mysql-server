@@ -182,10 +182,9 @@ bool owns_lock_shard(const lock_t *lock) {
 
 /** Validates the record lock queues on a page.
  @return true if ok */
-static bool lock_rec_validate_page(
-    const buf_block_t *block) /*!< in: buffer block */
-    MY_ATTRIBUTE((warn_unused_result));
-#endif /* UNIV_DEBUG */
+[[nodiscard]] static bool lock_rec_validate_page(
+    const buf_block_t *block); /*!< in: buffer block */
+#endif                         /* UNIV_DEBUG */
 
 /* The lock system */
 lock_sys_t *lock_sys = nullptr;
@@ -214,7 +213,7 @@ void lock_report_trx_id_insanity(trx_id_t trx_id, const rec_t *rec,
 #ifdef UNIV_DEBUG
 
 #else
-static MY_ATTRIBUTE((warn_unused_result))
+[[nodiscard]] static
 #endif
 bool lock_check_trx_id_sanity(
     trx_id_t trx_id,           /*!< in: trx id */
@@ -313,7 +312,8 @@ void lock_sys_create(
 
   lock_sys_sz = sizeof(*lock_sys) + srv_max_n_threads * sizeof(srv_slot_t);
 
-  lock_sys = static_cast<lock_sys_t *>(ut_zalloc_nokey(lock_sys_sz));
+  lock_sys = static_cast<lock_sys_t *>(
+      ut::zalloc_withkey(UT_NEW_THIS_FILE_PSI_KEY, lock_sys_sz));
 
   new (lock_sys) lock_sys_t{};
 
@@ -364,10 +364,10 @@ void lock_sys_resize(ulint n_cells) {
     TBD: if buf_resize_thread() were to use create_thd() then should it be
     instrumented (together or instead of os_thread_create instrumentation)? */
     ut_ad(current_thd == nullptr);
-    THD *thd = create_thd(false, true, true, PSI_NOT_INSTRUMENTED);
+    THD *thd = create_internal_thd();
     ut_ad(current_thd == thd);
     CONDITIONAL_SYNC_POINT("after_lock_sys_resize_rec_hash");
-    destroy_thd(thd);
+    destroy_internal_thd(thd);
     ut_ad(current_thd == nullptr);
   });
 
@@ -381,23 +381,6 @@ void lock_sys_resize(ulint n_cells) {
   HASH_MIGRATE(old_hash, lock_sys->prdt_page_hash, lock_t, hash,
                lock_rec_lock_fold);
   hash_table_free(old_hash);
-
-  /* need to update block->lock_hash_val */
-  for (ulint i = 0; i < srv_buf_pool_instances; ++i) {
-    buf_pool_t *buf_pool = buf_pool_from_array(i);
-
-    mutex_enter(&buf_pool->LRU_list_mutex);
-
-    for (auto bpage : buf_pool->LRU) {
-      if (buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE) {
-        buf_block_t *block;
-        block = reinterpret_cast<buf_block_t *>(bpage);
-
-        block->lock_hash_val = lock_rec_hash(bpage->id);
-      }
-    }
-    mutex_exit(&buf_pool->LRU_list_mutex);
-  }
 }
 
 /** Closes the lock system at database shutdown. */
@@ -423,13 +406,13 @@ void lock_sys_close(void) {
     }
   }
   for (auto &cached_lock_mode_name : lock_cached_lock_mode_names) {
-    ut_free(const_cast<char *>(cached_lock_mode_name.second));
+    ut::free(const_cast<char *>(cached_lock_mode_name.second));
   }
   lock_cached_lock_mode_names.clear();
 
   lock_sys->~lock_sys_t();
 
-  ut_free(lock_sys);
+  ut::free(lock_sys);
 
   lock_sys = nullptr;
 }
@@ -1302,7 +1285,7 @@ void RecLock::set_wait_state(lock_t *lock) {
   ut_ad(trx_mutex_own(m_trx));
   ut_ad(lock_get_wait(lock));
 
-  m_trx->lock.wait_started = ut_time();
+  m_trx->lock.wait_started = std::chrono::system_clock::now();
 
   m_trx->lock.que_state = TRX_QUE_LOCK_WAIT;
 
@@ -2055,9 +2038,7 @@ static void lock_rec_grant_by_heap_no(lock_t *in_lock, ulint heap_no) {
 
   using LockDescriptorEx = std::pair<trx_schedule_weight_t, lock_t *>;
   /* Preallocate for 4 lists with 32 locks. */
-  std::unique_ptr<mem_heap_t, decltype(&mem_heap_free)> heap(
-      mem_heap_create((sizeof(lock_t *) * 3 + sizeof(LockDescriptorEx)) * 32),
-      mem_heap_free);
+  MEM_HEAP_NEW(heap, (sizeof(lock_t *) * 3 + sizeof(LockDescriptorEx)) * 32);
 
   RecID rec_id{in_lock, heap_no};
   Locks<lock_t *> low_priority_light{heap.get()};
@@ -3471,7 +3452,7 @@ static dberr_t lock_table_enqueue_waiting(ulint mode, dict_table_t *table,
 
   trx->lock.que_state = TRX_QUE_LOCK_WAIT;
 
-  trx->lock.wait_started = ut_time();
+  trx->lock.wait_started = std::chrono::system_clock::now();
   trx->lock.was_chosen_as_deadlock_victim = false;
 
   auto stopped = que_thr_stop(thr);
@@ -3827,7 +3808,7 @@ static void lock_rec_release(lock_t *lock, ulint heap_no) {
 /** Removes a granted record lock of a transaction from the queue and grants
  locks to other transactions waiting in the queue if they now are entitled
  to a lock.
- This function is meant to be used only by row_unlock_for_mysql, and it assumes
+ This function is meant to be used only by row_try_unlock, and it assumes
  that the lock we are looking for has LOCK_REC_NOT_GAP flag.
  */
 void lock_rec_unlock(
@@ -3920,23 +3901,30 @@ static void lock_release_gap_lock(lock_t *lock) {
 released if rules permit it.
 @param[in]   lock       the lock that we consider releasing
 @param[in]   only_gap   true if we don't want to release records,
-                        just the gaps between them */
-static void lock_release_read_lock(lock_t *lock, bool only_gap) {
+                        just the gaps between them
+@return true iff the function did release (maybe a part of) a lock
+*/
+static bool lock_release_read_lock(lock_t *lock, bool only_gap) {
   /* Keep in sync with lock_edge_may_survive_prepare() */
   if (!lock->is_record_lock() || lock->is_insert_intention() ||
       lock->is_predicate()) {
     /* DO NOTHING */
+    return false;
   } else if (lock->is_gap()) {
     /* Release any GAP only lock. */
     lock_rec_dequeue_from_page(lock);
+    return true;
   } else if (lock->is_record_not_gap() && only_gap) {
     /* Don't release any non-GAP lock if not asked.*/
+    return false;
   } else if (lock->mode() == LOCK_S && !only_gap) {
     /* Release Shared Next Key Lock(SH + GAP) if asked for */
     lock_rec_dequeue_from_page(lock);
+    return true;
   } else {
     /* Release GAP lock from Next Key lock */
     lock_release_gap_lock(lock);
+    return true;
   }
 }
 
@@ -4023,6 +4011,11 @@ static bool try_relatch_trx_and_shard_and_do(const lock_t *lock, F &&f) {
                                           std::forward<F>(f));
 }
 
+/** We don't want to hold the Global latch for too long, even in S mode, not to
+starve threads waiting for X-latch on it such as lock_wait_timeout_thread().
+This defines the longest allowed critical section duration. */
+constexpr auto MAX_CS_DURATION = std::chrono::seconds{1};
+
 /** Tries to release read locks of a transaction without latching the whole
 lock sys. This may fail, if there are many concurrent threads editing the
 list of locks of this transaction (for example due to B-tree pages being
@@ -4031,7 +4024,8 @@ It is called during XA prepare to release locks early.
 @param[in,out]	trx		transaction
 @param[in]	only_gap	release only GAP locks
 @return true if and only if it succeeded to do the job*/
-static bool try_release_read_locks_in_s_mode(trx_t *trx, bool only_gap) {
+[[nodiscard]] static bool try_release_read_locks_in_s_mode(trx_t *trx,
+                                                           bool only_gap) {
   /* In order to access trx->lock.trx_locks safely we need to hold trx->mutex.
   So, conceptually we'd love to hold trx->mutex while iterating through
   trx->lock.trx_locks.
@@ -4050,9 +4044,11 @@ static bool try_release_read_locks_in_s_mode(trx_t *trx, bool only_gap) {
   7. verify that the version of trx->lock.trx_locks has not changed
   8. and only then perform any action on the lock.
   */
-  ut_ad(trx_mutex_own(trx));
-  ut_ad(locksys::owns_shared_global_latch());
+  locksys::Global_shared_latch_guard shared_latch_guard{UT_LOCATION_HERE};
+  trx_mutex_enter(trx);
+  ut_ad(trx->lock.wait_lock == nullptr);
 
+  bool made_progress{false};
   for (auto lock : trx->lock.trx_locks.removable()) {
     ut_ad(trx_mutex_own(trx));
     /* We didn't latch the lock_sys shard this `lock` is in, so we only read a
@@ -4060,78 +4056,90 @@ static bool try_release_read_locks_in_s_mode(trx_t *trx, bool only_gap) {
     page_no, and next pointer, which, as long as we hold trx->mutex, should be
     immutable.
     */
+    const auto release_read_lock = [lock, only_gap, &made_progress]() {
+      /* Note: The |= does not short-circut. We want the RHS called.*/
+      made_progress |= lock_release_read_lock(lock, only_gap);
+    };
     if (lock_get_type_low(lock) == LOCK_REC) {
       /* Following call temporarily releases trx->mutex */
-      if (!try_relatch_trx_and_shard_and_do(
-              lock, [=]() { lock_release_read_lock(lock, only_gap); })) {
-        /* Someone has modified the list while we were re-acquiring the latches
+      if (!try_relatch_trx_and_shard_and_do(lock, release_read_lock) ||
+          (made_progress && shared_latch_guard.is_x_blocked_by_us())) {
+        /* Someone has modified the list while we were re-acquiring the latches,
+        or someone is waiting for x-latch and we've already made some progress,
         so we need to start over again. */
+        trx_mutex_exit(trx);
         return false;
       }
     }
     /* As we have verified that the version was not changed by another thread,
     we can safely continue iteration even if we have removed the lock.*/
   }
+  trx_mutex_exit(trx);
   return true;
 }
-}  // namespace locksys
 
-/** Release read locks of a transacion latching the whole lock-sys in
+/** Release read locks of a transaction latching the whole lock-sys in
 exclusive mode, which is a bit too expensive to do by default.
 It is called during XA prepare to release locks early.
 @param[in,out]	trx		transaction
-@param[in]	only_gap	release only GAP locks */
-static void lock_trx_release_read_locks_in_x_mode(trx_t *trx, bool only_gap) {
+@param[in]	only_gap	release only GAP locks
+@return true if and only if it succeeded to do the job*/
+[[nodiscard]] static bool try_release_read_locks_in_x_mode(trx_t *trx,
+                                                           bool only_gap) {
   ut_ad(!trx_mutex_own(trx));
-
   /* We will iterate over locks from various shards. */
-  locksys::Global_exclusive_latch_guard guard{UT_LOCATION_HERE};
+  Global_exclusive_latch_guard guard{UT_LOCATION_HERE};
+  const auto started_at = std::chrono::steady_clock::now();
   trx_mutex_enter_first_of_two(trx);
 
   for (auto lock : trx->lock.trx_locks.removable()) {
+    if (MAX_CS_DURATION < std::chrono::steady_clock::now() - started_at) {
+      trx_mutex_exit(trx);
+      return false;
+    }
     DEBUG_SYNC_C("lock_trx_release_read_locks_in_x_mode_will_release");
 
     lock_release_read_lock(lock, only_gap);
   }
 
   trx_mutex_exit(trx);
+  return true;
 }
+}  // namespace locksys
 
 void lock_trx_release_read_locks(trx_t *trx, bool only_gap) {
   ut_ad(trx_can_be_handled_by_current_thread(trx));
 
-  size_t failures;
   const size_t MAX_FAILURES = 5;
 
-  {
-    locksys::Global_shared_latch_guard shared_latch_guard{UT_LOCATION_HERE};
-    trx_mutex_enter(trx);
-    ut_ad(trx->lock.wait_lock == nullptr);
-
-    for (failures = 0; failures < MAX_FAILURES; ++failures) {
-      if (locksys::try_release_read_locks_in_s_mode(trx, only_gap)) {
-        break;
-      }
+  for (size_t failures = 0; failures < MAX_FAILURES; ++failures) {
+    if (locksys::try_release_read_locks_in_s_mode(trx, only_gap)) {
+      return;
     }
-
-    trx_mutex_exit(trx);
+    std::this_thread::yield();
   }
 
-  if (failures == MAX_FAILURES) {
-    lock_trx_release_read_locks_in_x_mode(trx, only_gap);
+  while (!locksys::try_release_read_locks_in_x_mode(trx, only_gap)) {
+    std::this_thread::yield();
   }
 }
 
+namespace locksys {
 /** Releases transaction locks, and releases possible other transactions waiting
  because of these locks.
-@param[in,out]  trx   transaction */
-static void lock_release(trx_t *trx) {
+@param[in,out]  trx   transaction
+@return true if and only if it succeeded to do the job*/
+[[nodiscard]] static bool try_release_all_locks(trx_t *trx) {
   lock_t *lock;
   ut_ad(!locksys::owns_exclusive_global_latch());
   ut_ad(!trx_mutex_own(trx));
   ut_ad(!trx->is_dd_trx);
-
-  locksys::Global_shared_latch_guard shared_latch_guard{UT_LOCATION_HERE};
+  /* The length of the list is an atomic and the number of locks can't change
+  from zero to non-zero or vice-versa, see explanation below. */
+  if (UT_LIST_GET_LEN(trx->lock.trx_locks) == 0) {
+    return true;
+  }
+  Global_shared_latch_guard shared_latch_guard{UT_LOCATION_HERE};
   /* In order to access trx->lock.trx_locks safely we need to hold trx->mutex.
   The transaction is already in TRX_STATE_COMMITTED_IN_MEMORY state and is no
   longer referenced, so we are not afraid of implicit-to-explicit conversions,
@@ -4162,17 +4170,23 @@ static void lock_release(trx_t *trx) {
   ut_ad(trx->lock.wait_lock == nullptr);
   while ((lock = UT_LIST_GET_LAST(trx->lock.trx_locks)) != nullptr) {
     /* Following call temporarily releases trx->mutex */
-    locksys::try_relatch_trx_and_shard_and_do(lock, [=]() {
+    try_relatch_trx_and_shard_and_do(lock, [=]() {
       if (lock_get_type_low(lock) == LOCK_REC) {
         lock_rec_dequeue_from_page(lock);
       } else {
         lock_table_dequeue(lock);
       }
     });
+    if (shared_latch_guard.is_x_blocked_by_us()) {
+      trx_mutex_exit(trx);
+      return false;
+    }
   }
 
   trx_mutex_exit(trx);
+  return true;
 }
+}  // namespace locksys
 
 /* True if a lock mode is S or X */
 #define IS_LOCK_S_OR_X(lock) \
@@ -4533,7 +4547,6 @@ void lock_print_info_summary(FILE *file) {
 }
 
 /** Functor to print not-started transaction from the mysql_trx_list. */
-
 struct PrintNotStarted {
   PrintNotStarted(FILE *file) : m_file(file) {}
 
@@ -4558,7 +4571,6 @@ struct PrintNotStarted {
 
 /** Iterate over a transaction's locks. Keeping track of the
 iterator using an ordinal value. */
-
 class TrxLockIterator {
  public:
   TrxLockIterator() { rewind(); }
@@ -4668,9 +4680,12 @@ void lock_trx_print_wait_and_mvcc_state(FILE *file, const trx_t *trx) {
 
   if (trx->lock.que_state == TRX_QUE_LOCK_WAIT) {
     fprintf(file,
-            "------- TRX HAS BEEN WAITING %lu SEC"
-            " FOR THIS LOCK TO BE GRANTED:\n",
-            (ulong)difftime(ut_time(), trx->lock.wait_started));
+            "------- TRX HAS BEEN WAITING %" PRId64
+            " SEC FOR THIS LOCK TO BE GRANTED:\n",
+            static_cast<int64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now() - trx->lock.wait_started)
+                    .count()));
 
     if (lock_get_type_low(trx->lock.wait_lock) == LOCK_REC) {
       lock_rec_print(file, trx->lock.wait_lock);
@@ -4933,31 +4948,33 @@ static void rec_queue_validate_latched(const buf_block_t *block,
 
     trx_id = lock_clust_rec_some_has_impl(rec, index, offsets);
 
-    Trx_shard_latch_guard guard{trx_id, UT_LOCATION_HERE};
+    trx_sys->latch_and_execute_with_active_trx(
+        trx_id,
+        [&](const trx_t *impl_trx) {
+          if (impl_trx != nullptr) {
+            ut_ad(owns_page_shard(block->get_page_id()));
+            /* impl_trx cannot become TRX_STATE_COMMITTED_IN_MEMORY nor removed
+            from active_rw_trxs.by_id until we release Trx_shard's mutex, which
+            means that currently all other threads in the system consider this
+            impl_trx active and thus should respect implicit locks held by
+            impl_trx*/
 
-    const trx_t *impl_trx = trx_rw_is_active_low(trx_id);
-    if (impl_trx != nullptr) {
-      ut_ad(owns_page_shard(block->get_page_id()));
-      /* impl_trx cannot become TRX_STATE_COMMITTED_IN_MEMORY nor removed from
-      rw_trx_set until we release Trx_shard's mutex, which means that currently
-      all other threads in the system consider this impl_trx active and thus
-      should respect implicit locks held by impl_trx*/
+            const lock_t *other_lock = lock_rec_other_has_expl_req(
+                LOCK_S, block, true, heap_no, impl_trx);
 
-      const lock_t *other_lock =
-          lock_rec_other_has_expl_req(LOCK_S, block, true, heap_no, impl_trx);
+            /* The impl_trx is holding an implicit lock on the given 'rec'.
+            So there cannot be another explicit granted lock. Also, there can
+            be another explicit waiting lock only if the impl_trx has an
+            explicit granted lock. */
 
-      /* The impl_trx is holding an implicit lock on the
-      given record 'rec'. So there cannot be another
-      explicit granted lock.  Also, there can be another
-      explicit waiting lock only if the impl_trx has an
-      explicit granted lock. */
-
-      if (other_lock != nullptr) {
-        ut_a(lock_get_wait(other_lock));
-        ut_a(lock_rec_has_expl(LOCK_X | LOCK_REC_NOT_GAP, block, heap_no,
-                               impl_trx));
-      }
-    }
+            if (other_lock != nullptr) {
+              ut_a(lock_get_wait(other_lock));
+              ut_a(lock_rec_has_expl(LOCK_X | LOCK_REC_NOT_GAP, block, heap_no,
+                                     impl_trx));
+            }
+          }
+        },
+        UT_LOCATION_HERE);
   }
 
   Lock_iter::for_each(rec_id, [&](lock_t *lock) {
@@ -5132,7 +5149,7 @@ static void lock_rec_block_validate(const page_id_t &page_id) {
 }
 
 bool lock_validate() {
-  typedef std::set<page_id_t, std::less<page_id_t>, ut_allocator<page_id_t>>
+  typedef std::set<page_id_t, std::less<page_id_t>, ut::allocator<page_id_t>>
       page_addr_set;
 
   page_addr_set pages;
@@ -5253,7 +5270,7 @@ dberr_t lock_rec_insert_check_and_lock(
   switch (err) {
     case DB_SUCCESS_LOCKED_REC:
       err = DB_SUCCESS;
-      /* fall through */
+      [[fallthrough]];
     case DB_SUCCESS:
       if (!inherit_in || index->is_clustered()) {
         break;
@@ -5386,7 +5403,7 @@ void lock_rec_convert_active_impl_to_expl(const buf_block_t *block,
                                           const rec_t *rec, dict_index_t *index,
                                           const ulint *offsets, trx_t *trx,
                                           ulint heap_no) {
-  trx_reference(trx, true);
+  trx_reference(trx);
   lock_rec_convert_impl_to_expl_for_trx(block, rec, index, offsets, trx,
                                         heap_no);
 }
@@ -5605,10 +5622,10 @@ dberr_t lock_clust_rec_read_check_and_lock(
 
     MONITOR_INC(MONITOR_NUM_RECLOCK_REQ);
   }
+  DEBUG_SYNC_C("after_lock_clust_rec_read_check_and_lock");
 
   ut_d(locksys::rec_queue_latch_and_validate(block, rec, index, offsets));
 
-  DEBUG_SYNC_C("after_lock_clust_rec_read_check_and_lock");
   ut_ad(err == DB_SUCCESS || err == DB_SUCCESS_LOCKED_REC ||
         err == DB_LOCK_WAIT || err == DB_DEADLOCK || err == DB_SKIP_LOCKED ||
         err == DB_LOCK_NOWAIT);
@@ -5839,7 +5856,8 @@ const char *lock_get_mode_str(const lock_t *lock) /*!< in: lock */
     return "UNKNOWN";
   }
   auto name_string = name_stream.str();
-  char *name_buffer = (char *)ut_malloc_nokey(name_string.length() + 1);
+  char *name_buffer = (char *)ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY,
+                                                 name_string.length() + 1);
   strcpy(name_buffer, name_string.c_str());
   lock_cached_lock_mode_names[key] = name_buffer;
   return (name_buffer);
@@ -6044,7 +6062,9 @@ void lock_trx_release_locks(trx_t *trx) /*!< in/out: transaction */
   ut_ad(!trx_is_referenced(trx));
   trx_mutex_exit(trx);
 
-  lock_release(trx);
+  while (!locksys::try_release_all_locks(trx)) {
+    std::this_thread::yield();
+  }
 
   /* We don't free the locks one by one for efficiency reasons.
   We simply empty the heap one go. Similarly we reset n_rec_locks count to 0.
@@ -6377,7 +6397,8 @@ void lock_trx_alloc_locks(trx_t *trx) {
   constructed, but how can we (the lock-sys) "know" about it and why risk? */
   trx_mutex_enter(trx);
   ulint sz = REC_LOCK_SIZE * REC_LOCK_CACHE;
-  byte *ptr = reinterpret_cast<byte *>(ut_malloc_nokey(sz));
+  byte *ptr = reinterpret_cast<byte *>(
+      ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY, sz));
 
   /* We allocate one big chunk and then distribute it among
   the rest of the elements. The allocated chunk pointer is always
@@ -6388,7 +6409,8 @@ void lock_trx_alloc_locks(trx_t *trx) {
   }
 
   sz = TABLE_LOCK_SIZE * TABLE_LOCK_CACHE;
-  ptr = reinterpret_cast<byte *>(ut_malloc_nokey(sz));
+  ptr = reinterpret_cast<byte *>(
+      ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY, sz));
 
   for (ulint i = 0; i < TABLE_LOCK_CACHE; ++i, ptr += TABLE_LOCK_SIZE) {
     trx->lock.table_pool.push_back(reinterpret_cast<ib_lock_t *>(ptr));

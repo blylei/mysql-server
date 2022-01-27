@@ -142,10 +142,10 @@ of keys. For example if a btree level is:
 index: 0,1,2,3,4,5,6,7,8,9,10,11,12
 data:  b,b,b,b,b,b,g,g,j,j,j, x, y
 then we would store 5,7,10,11,12 in the array. */
-typedef std::vector<ib_uint64_t, ut_allocator<ib_uint64_t>> boundaries_t;
+typedef std::vector<ib_uint64_t, ut::allocator<ib_uint64_t>> boundaries_t;
 
 /** Allocator type used for index_map_t. */
-typedef ut_allocator<std::pair<const char *const, dict_index_t *>>
+typedef ut::allocator<std::pair<const char *const, dict_index_t *>>
     index_map_t_allocator;
 
 /** Auxiliary map used for sorting indexes by name in dict_stats_save(). */
@@ -507,8 +507,10 @@ static void dict_stats_copy(dict_table_t *dst, /*!< in/out: destination table */
   const dict_index_t *src_idx;
 
   for (dst_idx = dst->first_index(), src_idx = src->first_index();
-       dst_idx != nullptr; dst_idx = dst_idx->next(),
-      (src_idx != nullptr && (src_idx = src_idx->next()))) {
+       dst_idx != nullptr; dst_idx = dst_idx->next()) {
+    if (src_idx != nullptr) {
+      src_idx = src_idx->next();
+    }
     if (dict_stats_should_ignore_index(dst_idx)) {
       if (!(dst_idx->type & DICT_FTS)) {
         dict_stats_empty_index(dst_idx);
@@ -730,7 +732,7 @@ static void dict_stats_update_transient(
   table->stat_sum_of_other_index_sizes =
       sum_of_index_sizes - index->stat_index_size;
 
-  table->stats_last_recalc = ut_time_monotonic();
+  table->stats_last_recalc = std::chrono::steady_clock::now();
 
   table->stat_modified_counter = 0;
 
@@ -744,15 +746,15 @@ Wait time estimation is based on the last call of this function when not exist.
 Can be updated by this function if no waiter found now.
 @return true if long waiters exist */
 static bool dict_stats_index_long_waiters(
-    dict_index_t *index, ib_time_monotonic_t &wait_start_time) {
+    dict_index_t *index,
+    std::chrono::steady_clock::time_point &wait_start_time) {
   if (rw_lock_get_waiters(dict_index_get_lock(index))) {
-    const uint64_t diff =
-        std::max(ut_time_monotonic() - wait_start_time, (ib_time_monotonic_t)0);
+    const auto diff = std::chrono::steady_clock::now() - wait_start_time;
 
-    return diff > srv_fatal_semaphore_wait_threshold / 2;
+    return diff > get_srv_fatal_semaphore_wait_threshold() / 2;
   } else {
     /* estimated long wait not started yet. updates wait_start_time. */
-    wait_start_time = ut_time_monotonic();
+    wait_start_time = std::chrono::steady_clock::now();
 
     return false;
   }
@@ -796,7 +798,7 @@ static bool dict_stats_analyze_index_level(
     ib_uint64_t *total_pages,        /*!< out: total number of pages */
     boundaries_t *n_diff_boundaries, /*!< out: boundaries of the groups
                                    of distinct keys */
-    ib_time_monotonic_t &wait_start_time,
+    std::chrono::steady_clock::time_point &wait_start_time,
     /*!< in/out: last known time index lock wasn't awaited. */
     mtr_t *mtr) /*!< in/out: mini-transaction */
 {
@@ -891,8 +893,7 @@ static bool dict_stats_analyze_index_level(
   /* iterate over all user records on this level
   and compare each two adjacent ones, even the last on page
   X and the fist on page X+1 */
-  for (; btr_pcur_is_on_user_rec(&pcur);
-       btr_pcur_move_to_next_user_rec(&pcur, mtr)) {
+  for (; pcur.is_on_user_rec(); pcur.move_to_next_user_rec(mtr)) {
     bool rec_is_last_on_page;
 
     rec = btr_pcur_get_rec(&pcur);
@@ -1079,7 +1080,7 @@ end:
   btr_leaf_page_release(btr_pcur_get_block(&pcur), BTR_SEARCH_LEAF, mtr);
 
   btr_pcur_close(&pcur);
-  ut_free(prev_rec_buf);
+  ut::free(prev_rec_buf);
   mem_heap_free(heap);
 
   return success;
@@ -1422,8 +1423,8 @@ awaited.
 @return false if aborted */
 static bool dict_stats_analyze_index_for_n_prefix(
     dict_index_t *index, ulint n_prefix, const boundaries_t *boundaries,
-    n_diff_data_t *n_diff_data, ib_time_monotonic_t &wait_start_time,
-    mtr_t *mtr) {
+    n_diff_data_t *n_diff_data,
+    std::chrono::steady_clock::time_point &wait_start_time, mtr_t *mtr) {
   btr_pcur_t pcur;
   const page_t *page;
   ib_uint64_t rec_idx;
@@ -1532,7 +1533,7 @@ static bool dict_stats_analyze_index_for_n_prefix(
 
     /* seek to the record with index dive_below_idx */
     while (rec_idx < dive_below_idx && btr_pcur_is_on_user_rec(&pcur)) {
-      btr_pcur_move_to_next_user_rec(&pcur, mtr);
+      pcur.move_to_next_user_rec(mtr);
       rec_idx++;
     }
 
@@ -1678,7 +1679,6 @@ static bool dict_stats_analyze_index_low(ib_uint64_t &n_sample_pages,
   ib_uint64_t total_recs;
   ib_uint64_t total_pages;
   const ib_uint64_t n_diff_required = n_sample_pages * 10;
-  ib_time_monotonic_t wait_start_time;
   bool succeeded = true;
   mtr_t mtr;
   ulint size;
@@ -1724,7 +1724,7 @@ static bool dict_stats_analyze_index_low(ib_uint64_t &n_sample_pages,
   mtr_start(&mtr);
 
   mtr_sx_lock(dict_index_get_lock(index), &mtr);
-  wait_start_time = ut_time_monotonic();
+  auto wait_start_time = std::chrono::steady_clock::now();
 
   root_level = btr_height_get(index, &mtr);
 
@@ -1778,17 +1778,20 @@ static bool dict_stats_analyze_index_low(ib_uint64_t &n_sample_pages,
 
   /* For each level that is being scanned in the btree, this contains the
   number of different key values for all possible n-column prefixes. */
-  ib_uint64_t *n_diff_on_level =
-      UT_NEW_ARRAY(ib_uint64_t, n_uniq, mem_key_dict_stats_n_diff_on_level);
+  ib_uint64_t *n_diff_on_level = ut::new_arr_withkey<ib_uint64_t>(
+      ut::make_psi_memory_key(mem_key_dict_stats_n_diff_on_level),
+      ut::Count{n_uniq});
 
   /* For each level that is being scanned in the btree, this contains the
   index of the last record from each group of equal records (when
   comparing only the first n columns, n=1..n_uniq). */
-  boundaries_t *n_diff_boundaries = UT_NEW_ARRAY_NOKEY(boundaries_t, n_uniq);
+  boundaries_t *n_diff_boundaries = ut::new_arr_withkey<boundaries_t>(
+      UT_NEW_THIS_FILE_PSI_KEY, ut::Count{n_uniq});
 
   /* For each n-column prefix this array contains the input data that is
   used to calculate dict_index_t::stat_n_diff_key_vals[]. */
-  n_diff_data_t *n_diff_data = UT_NEW_ARRAY_NOKEY(n_diff_data_t, n_uniq);
+  n_diff_data_t *n_diff_data = ut::new_arr_withkey<n_diff_data_t>(
+      UT_NEW_THIS_FILE_PSI_KEY, ut::Count{n_uniq});
 
   /* total_recs is also used to estimate the number of pages on one
   level below, so at the start we have 1 page (the root) */
@@ -1818,7 +1821,7 @@ static bool dict_stats_analyze_index_low(ib_uint64_t &n_sample_pages,
     mtr_commit(&mtr);
     mtr_start(&mtr);
     mtr_sx_lock(dict_index_get_lock(index), &mtr);
-    wait_start_time = ut_time_monotonic();
+    wait_start_time = std::chrono::steady_clock::now();
     if (root_level != btr_height_get(index, &mtr)) {
       /* Just quit if the tree has changed beyond
       recognition here. The old stats from previous
@@ -1963,9 +1966,9 @@ static bool dict_stats_analyze_index_low(ib_uint64_t &n_sample_pages,
 end:
   mtr_commit(&mtr);
 
-  UT_DELETE_ARRAY(n_diff_boundaries);
+  ut::delete_arr(n_diff_boundaries);
 
-  UT_DELETE_ARRAY(n_diff_on_level);
+  ut::delete_arr(n_diff_on_level);
 
   /* n_prefix == 0 means that the above loop did not end up prematurely
   due to tree being changed and so n_diff_data[] is set up. */
@@ -1973,7 +1976,7 @@ end:
     dict_stats_index_set_n_diff(n_diff_data, index);
   }
 
-  UT_DELETE_ARRAY(n_diff_data);
+  ut::delete_arr(n_diff_data);
 
   if (succeeded) {
     dict_stats_assert_initialized_index(index);
@@ -2063,7 +2066,7 @@ static dberr_t dict_stats_update_persistent(
     table->stat_sum_of_other_index_sizes += index->stat_index_size;
   }
 
-  table->stats_last_recalc = ut_time_monotonic();
+  table->stats_last_recalc = std::chrono::steady_clock::now();
 
   table->stat_modified_counter = 0;
 
@@ -2188,7 +2191,6 @@ are saved
 static dberr_t dict_stats_save(dict_table_t *table_orig,
                                const index_id_t *only_for_index) {
   pars_info_t *pinfo;
-  lint now;
   dberr_t ret;
   dict_table_t *table;
   char db_utf8[dict_name::MAX_DB_UTF8_LEN];
@@ -2204,7 +2206,8 @@ static dberr_t dict_stats_save(dict_table_t *table_orig,
   /* MySQL's timestamp is 4 byte, so we use
   pars_info_add_int4_literal() which takes a lint arg, so "now" is
   lint */
-  now = (lint)ut_time();
+  auto now = static_cast<uint32_t>(
+      std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
 
   pinfo = pars_info_create();
 

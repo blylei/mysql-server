@@ -263,13 +263,21 @@ void Gtid_state::end_gtid_violating_transaction(THD *thd) {
 }
 
 bool Gtid_state::wait_for_sidno(THD *thd, rpl_sidno sidno,
-                                struct timespec *abstime) {
+                                struct timespec *abstime,
+                                bool update_thd_status) {
   DBUG_TRACE;
   PSI_stage_info old_stage;
+  PSI_stage_info stage = stage_waiting_for_gtid_to_be_committed;
   sid_lock->assert_some_lock();
   sid_locks.assert_owner(sidno);
-  sid_locks.enter_cond(thd, sidno, &stage_waiting_for_gtid_to_be_committed,
-                       &old_stage);
+
+  if (!update_thd_status) {
+    // Keep the same stage info on the new condition.
+    stage.m_key = thd->get_current_stage_key();
+    stage.m_name = thd->proc_info();
+  }
+
+  sid_locks.enter_cond(thd, sidno, &stage, &old_stage);
   bool ret = sid_locks.wait(thd, sidno, abstime);
   // Can't call sid_locks.unlock() as that requires global_sid_lock.
   mysql_mutex_unlock(thd->current_mutex);
@@ -289,8 +297,8 @@ bool Gtid_state::wait_for_gtid(THD *thd, const Gtid &gtid,
   return ret;
 }
 
-bool Gtid_state::wait_for_gtid_set(THD *thd, Gtid_set *wait_for,
-                                   double timeout) {
+bool Gtid_state::wait_for_gtid_set(THD *thd, Gtid_set *wait_for, double timeout,
+                                   bool update_thd_status) {
   struct timespec abstime;
   DBUG_TRACE;
   DEBUG_SYNC(thd, "begin_wait_for_executed_gtid_set");
@@ -365,8 +373,8 @@ bool Gtid_state::wait_for_gtid_set(THD *thd, Gtid_set *wait_for,
         todo.remove_intervals_for_sidno(&executed_gtids, sidno);
 
         if (todo.contains_sidno(sidno)) {
-          bool ret =
-              wait_for_sidno(thd, sidno, timeout > 0 ? &abstime : nullptr);
+          bool ret = wait_for_sidno(
+              thd, sidno, timeout > 0 ? &abstime : nullptr, update_thd_status);
 
           // wait_for_gtid will release both the global lock and the
           // mutex.  Acquire the global lock again.
@@ -788,8 +796,9 @@ bool Gtid_state::update_gtids_impl_begin(THD *thd) {
   return thd->is_commit_in_middle_of_statement;
 }
 
-void Gtid_state ::update_gtids_impl_own_gtid_set(
-    THD *thd MY_ATTRIBUTE((unused)), bool is_commit MY_ATTRIBUTE((unused))) {
+void Gtid_state ::update_gtids_impl_own_gtid_set(THD *thd [[maybe_unused]],
+                                                 bool is_commit
+                                                 [[maybe_unused]]) {
 #ifdef HAVE_GTID_NEXT_LIST
   rpl_sidno prev_sidno = 0;
   Gtid_set::Gtid_iterator git(&thd->owned_gtid_set);
@@ -933,8 +942,7 @@ void Gtid_state::update_gtids_impl_own_anonymous(THD *thd, bool *more_trx) {
   }
 }
 
-void Gtid_state::update_gtids_impl_own_nothing(
-    THD *thd MY_ATTRIBUTE((unused))) {
+void Gtid_state::update_gtids_impl_own_nothing(THD *thd [[maybe_unused]]) {
   assert(thd->commit_error != THD::CE_COMMIT_ERROR ||
          thd->has_gtid_consistency_violation);
   assert(thd->variables.gtid_next.type == AUTOMATIC_GTID);

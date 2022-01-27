@@ -135,7 +135,7 @@ PSI_stage_info MDL_key::m_namespace_to_wait_state_name[NAMESPACE_END] = {
 void MDL_key::init_psi_keys() {
   int i;
   int count;
-  PSI_stage_info *info MY_ATTRIBUTE((unused));
+  PSI_stage_info *info [[maybe_unused]];
 
   count =
       static_cast<int>(array_elements(MDL_key::m_namespace_to_wait_state_name));
@@ -4655,15 +4655,16 @@ MDL_ticket_store::MDL_ticket_handle MDL_ticket_store::find_in_hash(
   auto foundrng = m_map->equal_range(&req.key);
 
   const MDL_ticket_handle *found_handle = nullptr;
-  std::find_if(foundrng.first, foundrng.second,
-               [&](const Ticket_map::value_type &vt) {
-                 auto &th = vt.second;
-                 if (!th.m_ticket->has_stronger_or_equal_type(req.type)) {
-                   return false;
-                 }
-                 found_handle = &th;
-                 return (th.m_dur == req.duration);
-               });
+  // VS tags std::find_if with 'nodiscard'.
+  (void)std::find_if(foundrng.first, foundrng.second,
+                     [&](const Ticket_map::value_type &vt) {
+                       auto &th = vt.second;
+                       if (!th.m_ticket->has_stronger_or_equal_type(req.type)) {
+                         return false;
+                       }
+                       found_handle = &th;
+                       return (th.m_dur == req.duration);
+                     });
 
   if (found_handle != nullptr) {
     return *found_handle;

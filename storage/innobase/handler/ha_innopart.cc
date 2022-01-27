@@ -54,6 +54,7 @@ Created Nov 22, 2013 Mattias Jonsson */
 
 /* Include necessary InnoDB headers */
 #include "btr0sea.h"
+#include "ddl0ddl.h"
 #include "dict0dd.h"
 #include "dict0dict.h"
 #include "dict0priv.h"
@@ -73,7 +74,6 @@ Created Nov 22, 2013 Mattias Jonsson */
 #include "partition_info.h"
 #include "row0import.h"
 #include "row0ins.h"
-#include "row0merge.h"
 #include "row0mysql.h"
 #include "row0quiesce.h"
 #include "row0sel.h"
@@ -95,11 +95,11 @@ Ha_innopart_share::Ha_innopart_share(TABLE_SHARE *table_share)
 Ha_innopart_share::~Ha_innopart_share() {
   ut_ad(m_ref_count == 0);
   if (m_table_parts != nullptr) {
-    ut_free(m_table_parts);
+    ut::free(m_table_parts);
     m_table_parts = nullptr;
   }
   if (m_index_mapping != nullptr) {
-    ut_free(m_index_mapping);
+    ut::free(m_index_mapping);
     m_index_mapping = nullptr;
   }
 }
@@ -208,7 +208,8 @@ void Ha_innopart_share::set_v_templ(TABLE *table, dict_table_t *ib_table,
   if (ib_table->n_v_cols > 0) {
     for (ulint i = 0; i < m_tot_parts; i++) {
       if (m_table_parts[i]->vc_templ == nullptr) {
-        m_table_parts[i]->vc_templ = UT_NEW_NOKEY(dict_vcol_templ_t());
+        m_table_parts[i]->vc_templ =
+            ut::new_withkey<dict_vcol_templ_t>(UT_NEW_THIS_FILE_PSI_KEY);
         m_table_parts[i]->vc_templ->vtempl = nullptr;
       } else if (m_table_parts[i]->get_ref_count() == 1) {
         /* Clean and refresh the template */
@@ -272,8 +273,8 @@ dict_table_t **Ha_innopart_share::open_table_parts(THD *thd, const TABLE *table,
 
   uint tot_parts = part_info->get_tot_partitions();
   size_t table_parts_size = sizeof(dict_table_t *) * tot_parts;
-  dict_table_t **table_parts = static_cast<dict_table_t **>(
-      ut_zalloc(table_parts_size, mem_key_partitioning));
+  dict_table_t **table_parts = static_cast<dict_table_t **>(ut::zalloc_withkey(
+      ut::make_psi_memory_key(mem_key_partitioning), table_parts_size));
   if (table_parts == nullptr) {
     return (nullptr);
   }
@@ -296,7 +297,7 @@ dict_table_t **Ha_innopart_share::open_table_parts(THD *thd, const TABLE *table,
                             &table_parts[i])) {
       ut_ad(table_parts[i] == nullptr);
       close_table_parts(table_parts, i);
-      ut_free(table_parts);
+      ut::free(table_parts);
       return (nullptr);
     }
     i++;
@@ -339,7 +340,7 @@ bool Ha_innopart_share::set_table_parts_and_indexes(
       ut_ad(m_table_parts[i] == table_parts[i]);
     }
 #endif /* UNIV_DEBUG */
-    ut_free(table_parts);
+    ut::free(table_parts);
     return (false);
   }
 
@@ -366,8 +367,8 @@ bool Ha_innopart_share::set_table_parts_and_indexes(
   if (mysql_num_index != 0) {
     size_t alloc_size =
         mysql_num_index * m_tot_parts * sizeof(*m_index_mapping);
-    m_index_mapping = static_cast<dict_index_t **>(
-        ut_zalloc(alloc_size, mem_key_partitioning));
+    m_index_mapping = static_cast<dict_index_t **>(ut::zalloc_withkey(
+        ut::make_psi_memory_key(mem_key_partitioning), alloc_size));
     if (m_index_mapping == nullptr) {
       /* Report an error if index_mapping continues to be
       NULL and mysql_num_index is a non-zero value. */
@@ -419,7 +420,7 @@ bool Ha_innopart_share::set_table_parts_and_indexes(
     }
   }
   if (!index_loaded && m_index_mapping != nullptr) {
-    ut_free(m_index_mapping);
+    ut::free(m_index_mapping);
     m_index_mapping = nullptr;
   }
 
@@ -472,12 +473,12 @@ void Ha_innopart_share::close_table_parts(void) {
 
   if (m_table_parts != nullptr) {
     close_table_parts(m_table_parts, m_tot_parts);
-    ut_free(m_table_parts);
+    ut::free(m_table_parts);
     m_table_parts = nullptr;
   }
 
   if (m_index_mapping != nullptr) {
-    ut_free(m_index_mapping);
+    ut::free(m_index_mapping);
     m_index_mapping = nullptr;
   }
 
@@ -637,8 +638,8 @@ This should only be called once from ha_innobase::open().
 Therefore there's no need for a covering lock.
 @param[in]	no_lock	If locking should be skipped. Not used!
 @return	0 for success or error code. */
-inline int ha_innopart::initialize_auto_increment(
-    bool no_lock MY_ATTRIBUTE((unused))) {
+inline int ha_innopart::initialize_auto_increment(bool no_lock
+                                                  [[maybe_unused]]) {
   int error = 0;
   ulonglong auto_inc = 0;
   const Field *field = table->found_next_number_field;
@@ -1121,25 +1122,26 @@ int ha_innopart::open(const char *name, int, uint, const dd::Table *table_def) {
 #endif /* HA_INNOPART_SUPPORTS_FULLTEXT */
 
   size_t alloc_size = sizeof(*m_ins_node_parts) * m_tot_parts;
-  m_ins_node_parts =
-      static_cast<ins_node_t **>(ut_zalloc(alloc_size, mem_key_partitioning));
+  m_ins_node_parts = static_cast<ins_node_t **>(ut::zalloc_withkey(
+      ut::make_psi_memory_key(mem_key_partitioning), alloc_size));
 
   alloc_size = sizeof(*m_upd_node_parts) * m_tot_parts;
-  m_upd_node_parts =
-      static_cast<upd_node_t **>(ut_zalloc(alloc_size, mem_key_partitioning));
+  m_upd_node_parts = static_cast<upd_node_t **>(ut::zalloc_withkey(
+      ut::make_psi_memory_key(mem_key_partitioning), alloc_size));
 
   alloc_blob_heap_array();
 
   alloc_size = sizeof(*m_trx_id_parts) * m_tot_parts;
-  m_trx_id_parts =
-      static_cast<trx_id_t *>(ut_zalloc(alloc_size, mem_key_partitioning));
+  m_trx_id_parts = static_cast<trx_id_t *>(ut::zalloc_withkey(
+      ut::make_psi_memory_key(mem_key_partitioning), alloc_size));
 
   alloc_size = sizeof(*m_row_read_type_parts) * m_tot_parts;
-  m_row_read_type_parts =
-      static_cast<ulint *>(ut_zalloc(alloc_size, mem_key_partitioning));
+  m_row_read_type_parts = static_cast<ulint *>(ut::zalloc_withkey(
+      ut::make_psi_memory_key(mem_key_partitioning), alloc_size));
 
   alloc_size = sizeof(*m_bitset) * UT_BITS_IN_BYTES(m_tot_parts);
-  m_bitset = static_cast<byte *>(ut_zalloc(alloc_size, mem_key_partitioning));
+  m_bitset = static_cast<byte *>(ut::zalloc_withkey(
+      ut::make_psi_memory_key(mem_key_partitioning), alloc_size));
 
   if (m_ins_node_parts == nullptr || m_upd_node_parts == nullptr ||
       m_blob_heap_parts == nullptr || m_trx_id_parts == nullptr ||
@@ -1149,6 +1151,7 @@ int ha_innopart::open(const char *name, int, uint, const dd::Table *table_def) {
   }
 
   m_sql_stat_start_parts.init(m_bitset, UT_BITS_IN_BYTES(m_tot_parts));
+  m_reuse_mysql_template = false;
 
   info(HA_STATUS_NO_LOCK | HA_STATUS_VARIABLE | HA_STATUS_CONST);
 
@@ -1260,23 +1263,23 @@ int ha_innopart::close() {
   }
 
   if (m_ins_node_parts != nullptr) {
-    ut_free(m_ins_node_parts);
+    ut::free(m_ins_node_parts);
     m_ins_node_parts = nullptr;
   }
   if (m_upd_node_parts != nullptr) {
-    ut_free(m_upd_node_parts);
+    ut::free(m_upd_node_parts);
     m_upd_node_parts = nullptr;
   }
   if (m_trx_id_parts != nullptr) {
-    ut_free(m_trx_id_parts);
+    ut::free(m_trx_id_parts);
     m_trx_id_parts = nullptr;
   }
   if (m_row_read_type_parts != nullptr) {
-    ut_free(m_row_read_type_parts);
+    ut::free(m_row_read_type_parts);
     m_row_read_type_parts = nullptr;
   }
 
-  ut_free(m_bitset);
+  ut::free(m_bitset);
   m_bitset = nullptr;
 
   MONITOR_INC(MONITOR_TABLE_CLOSE);
@@ -1359,6 +1362,7 @@ void ha_innopart::update_partition(uint part_id) {
   m_row_read_type_parts[part_id] = m_prebuilt->row_read_type;
   if (m_prebuilt->sql_stat_start == 0) {
     m_sql_stat_start_parts.set(part_id, false);
+    m_reuse_mysql_template = true;
   }
   m_last_part = part_id;
 }
@@ -1583,7 +1587,8 @@ int ha_innopart::init_record_priority_queue_for_parts(uint used_parts) {
   if (need_clust_index) {
     alloc_size *= 2;
   }
-  buf = ut_zalloc(alloc_size, mem_key_partitioning);
+  buf = ut::zalloc_withkey(ut::make_psi_memory_key(mem_key_partitioning),
+                           alloc_size);
   if (buf == nullptr) {
     return true;
   }
@@ -1593,7 +1598,8 @@ int ha_innopart::init_record_priority_queue_for_parts(uint used_parts) {
   }
   /* mapping from part_id to pcur. */
   alloc_size = m_tot_parts * sizeof(*m_pcur_map);
-  buf = ut_zalloc(alloc_size, mem_key_partitioning);
+  buf = ut::zalloc_withkey(ut::make_psi_memory_key(mem_key_partitioning),
+                           alloc_size);
   if (buf == nullptr) {
     return true;
   }
@@ -1621,7 +1627,7 @@ inline void ha_innopart::destroy_record_priority_queue_for_parts() {
         btr_pcur_free(&m_clust_pcur_parts[i]);
       }
     }
-    ut_free(m_pcur_parts);
+    ut::free(m_pcur_parts);
     m_clust_pcur_parts = nullptr;
     m_pcur_parts = nullptr;
     /* Reset the original m_prebuilt->pcur. */
@@ -1629,7 +1635,7 @@ inline void ha_innopart::destroy_record_priority_queue_for_parts() {
     m_prebuilt->clust_pcur = m_clust_pcur;
   }
   if (m_pcur_map != nullptr) {
-    ut_free(m_pcur_map);
+    ut::free(m_pcur_map);
     m_pcur_map = nullptr;
   }
 }
@@ -2046,14 +2052,15 @@ int ha_innopart::sample_init(void *&scan_ctx, double sampling_percentage,
   }
 
   /* Parallel read is not currently supported for sampling. */
-  size_t max_threads = Parallel_reader::available_threads(1);
+  size_t max_threads = Parallel_reader::available_threads(1, false);
 
   if (max_threads == 0) {
     return HA_ERR_SAMPLING_INIT_FAILED;
   }
 
-  Histogram_sampler *sampler = UT_NEW_NOKEY(Histogram_sampler(
-      max_threads, sampling_seed, sampling_percentage, sampling_method));
+  Histogram_sampler *sampler = ut::new_withkey<Histogram_sampler>(
+      UT_NEW_THIS_FILE_PSI_KEY, max_threads, sampling_seed, sampling_percentage,
+      sampling_method);
 
   if (sampler == nullptr) {
     Parallel_reader::release_threads(max_threads);
@@ -2114,7 +2121,7 @@ int ha_innopart::sample_next(void *scan_ctx, uchar *buf) {
 
 int ha_innopart::sample_end(void *scan_ctx) {
   auto sampler = static_cast<Histogram_sampler *>(scan_ctx);
-  UT_DELETE(sampler);
+  ut::delete_(sampler);
 
   return 0;
 }
@@ -2304,7 +2311,6 @@ void ha_innopart::update_create_info(HA_CREATE_INFO *create_info) {
   uint num_parts;
   uint part;
   bool display_tablespace = false;
-  dict_table_t *table;
   List_iterator<partition_element> part_it(m_part_info->partitions);
   partition_element *part_elem;
   partition_element *sub_elem;
@@ -2332,21 +2338,24 @@ void ha_innopart::update_create_info(HA_CREATE_INFO *create_info) {
     return;
   }
   part = 0;
-  while ((part_elem = part_it++)) {
+  for (part_elem = part_it++; part_elem != nullptr;
+       part_elem = part_it++, part++) {
     if (part >= num_parts) {
       return;
     }
     if (m_part_info->is_sub_partitioned()) {
       List_iterator<partition_element> subpart_it(part_elem->subpartitions);
       uint subpart = 0;
-      while ((sub_elem = subpart_it++)) {
+      for (sub_elem = subpart_it++; sub_elem != nullptr;
+           sub_elem = subpart_it++) {
         if (subpart >= num_subparts) {
           return;
         }
-        table = m_part_share->get_table_part(part * num_subparts + subpart);
+        auto table_part =
+            m_part_share->get_table_part(part * num_subparts + subpart);
 
         if (sub_elem->tablespace_name != nullptr ||
-            table->tablespace != nullptr || table->space == 0) {
+            table_part->tablespace != nullptr || table_part->space == 0) {
           display_tablespace = true;
         }
         subpart++;
@@ -2355,14 +2364,13 @@ void ha_innopart::update_create_info(HA_CREATE_INFO *create_info) {
         return;
       }
     } else {
-      table = m_part_share->get_table_part(part);
+      auto table_part = m_part_share->get_table_part(part);
 
-      if (table->space == 0 || table->tablespace != nullptr ||
+      if (table_part->space == 0 || table_part->tablespace != nullptr ||
           part_elem->tablespace_name != nullptr) {
         display_tablespace = true;
       }
     }
-    part++;
   }
   if (part != num_parts) {
     return;
@@ -2374,16 +2382,17 @@ void ha_innopart::update_create_info(HA_CREATE_INFO *create_info) {
 
   part = 0;
   part_it.rewind();
-  while ((part_elem = part_it++)) {
+  for (part_elem = part_it++; part_elem != nullptr; part_elem = part_it++) {
     if (m_part_info->is_sub_partitioned()) {
       List_iterator<partition_element> subpart_it(part_elem->subpartitions);
-      while ((sub_elem = subpart_it++)) {
-        table = m_part_share->get_table_part(part++);
-        update_part_elem(sub_elem, table, display_tablespace);
+      for (sub_elem = subpart_it++; sub_elem != nullptr;
+           sub_elem = subpart_it++) {
+        auto table_part = m_part_share->get_table_part(part++);
+        update_part_elem(sub_elem, table_part, display_tablespace);
       }
     } else {
-      table = m_part_share->get_table_part(part++);
-      update_part_elem(part_elem, table, display_tablespace);
+      auto table_part = m_part_share->get_table_part(part++);
+      update_part_elem(part_elem, table_part, display_tablespace);
     }
   }
 }
@@ -2515,12 +2524,12 @@ int ha_innopart::create(const char *name, TABLE *form,
   std::vector<const char *> tablespace_names;
   List_iterator_fast<partition_element> part_it(form->part_info->partitions);
   partition_element *part_elem;
-  while ((part_elem = part_it++)) {
+  for (part_elem = part_it++; part_elem != nullptr; part_elem = part_it++) {
     const char *tablespace;
     if (form->part_info->is_sub_partitioned()) {
       List_iterator_fast<partition_element> sub_it(part_elem->subpartitions);
       partition_element *sub_elem;
-      while ((sub_elem = sub_it++)) {
+      for (sub_elem = sub_it++; sub_elem != nullptr; sub_elem = sub_it++) {
         tablespace = partition_get_tablespace(table_level_tablespace_name,
                                               part_elem, sub_elem);
         if (is_shared_tablespace(tablespace)) {
@@ -2824,13 +2833,11 @@ int ha_innopart::set_dd_discard_attribute(dd::Table *table_def, bool discard) {
   }
 
   /* Set new table id of the first partition to dd::Column::se_private_data */
-  if (!discard) {
-    table = m_part_share->get_table_part(0);
+  table = m_part_share->get_table_part(0);
 
-    for (auto dd_column : *table_def->columns()) {
-      dd_column->se_private_data().set(dd_index_key_strings[DD_TABLE_ID],
-                                       table->id);
-    }
+  for (auto dd_column : *table_def->columns()) {
+    dd_column->se_private_data().set(dd_index_key_strings[DD_TABLE_ID],
+                                     table->id);
   }
 
   return error;
@@ -3187,7 +3194,7 @@ int ha_innopart::records(ha_rows *num_rows) {
   auto trx = thd_to_trx(ha_thd());
   size_t n_threads = thd_parallel_read_threads(m_prebuilt->trx->mysql_thd);
 
-  n_threads = Parallel_reader::available_threads(n_threads);
+  n_threads = Parallel_reader::available_threads(n_threads, false);
 
   if (n_threads > 0 && trx->isolation_level > TRX_ISO_READ_UNCOMMITTED &&
       m_prebuilt->select_lock_type == LOCK_NONE &&
@@ -3523,8 +3530,9 @@ int ha_innopart::info_low(uint flag, bool is_analyze) {
           return error;
         }
       }
-      stats.update_time =
-          std::max(stats.update_time, ulong(ib_table->update_time));
+      stats.update_time = std::max(stats.update_time,
+                                   ulong(std::chrono::system_clock::to_time_t(
+                                       ib_table->update_time.load())));
     }
 
     if (is_analyze || innobase_stats_on_metadata) {
@@ -3966,6 +3974,7 @@ int ha_innopart::start_stmt(THD *thd, thr_lock_type lock_type) {
   } else {
     m_sql_stat_start_parts.reset();
   }
+  m_reuse_mysql_template = false;
   return (error);
 }
 
@@ -4089,6 +4098,7 @@ int ha_innopart::external_lock(THD *thd, int lock_type) {
   } else {
     m_sql_stat_start_parts.reset();
   }
+  m_reuse_mysql_template = false;
   return (error);
 }
 
@@ -4142,8 +4152,8 @@ mem_heap_t **ha_innopart::alloc_blob_heap_array() {
   DBUG_TRACE;
 
   const ulint len = sizeof(mem_heap_t *) * m_tot_parts;
-  m_blob_heap_parts =
-      static_cast<mem_heap_t **>(ut_zalloc(len, mem_key_partitioning));
+  m_blob_heap_parts = static_cast<mem_heap_t **>(
+      ut::zalloc_withkey(ut::make_psi_memory_key(mem_key_partitioning), len));
   if (m_blob_heap_parts == nullptr) {
     return nullptr;
   }
@@ -4157,7 +4167,7 @@ void ha_innopart::free_blob_heap_array() {
 
   if (m_blob_heap_parts != nullptr) {
     clear_blob_heaps();
-    ut_free(m_blob_heap_parts);
+    ut::free(m_blob_heap_parts);
     m_blob_heap_parts = nullptr;
   }
 }
@@ -4226,7 +4236,7 @@ err:
 }
 
 /****************************************************************************
- * DS-MRR implementation
+DS-MRR implementation
  ***************************************************************************/
 
 /* TODO: move the default implementations into the base handler class! */

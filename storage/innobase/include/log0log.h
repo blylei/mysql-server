@@ -1299,7 +1299,7 @@ inline bool log_checkpointer_is_active();
 @param[in]      iv           encryption iv
 @param[in]      is_boot      if it's for bootstrap
 @param[in]      encrypt_key  encrypt with master key */
-bool log_file_header_fill_encryption(byte *buf, byte *key, byte *iv,
+bool log_file_header_fill_encryption(byte *buf, const byte *key, const byte *iv,
                                      bool is_boot, bool encrypt_key);
 
 /** Disable redo logging and persist the information.
@@ -1313,6 +1313,9 @@ void log_persist_enable(log_t &log);
 /** Persist the information that it is safe to restart server.
 @param[in,out]	log	redo log */
 void log_persist_crash_safe(log_t &log);
+
+/* PFS key for the redo log buffer's memory */
+extern PSI_memory_key log_buffer_memory_key;
 
 #else /* !UNIV_HOTBACKUP */
 

@@ -198,7 +198,7 @@ template <class T, class BufferType,
               std::declval<typename std::add_lvalue_reference<T>::type>()))>
 using buffer_sequence_requirements = std::integral_constant<
     bool,
-    stdx::conjunction<
+    std::conjunction<
         // check if buffer_sequence_begin(T &) and buffer_sequence_end(T &)
         // exist and return the same type
         std::is_same<Begin, End>,
@@ -212,7 +212,7 @@ struct is_buffer_sequence : std::false_type {};
 
 template <class T, class BufferType>
 struct is_buffer_sequence<
-    T, BufferType, stdx::void_t<buffer_sequence_requirements<T, BufferType>>>
+    T, BufferType, std::void_t<buffer_sequence_requirements<T, BufferType>>>
     : std::true_type {};
 
 template <class T>
@@ -246,7 +246,7 @@ struct is_dynamic_buffer : std::false_type {};
 template <class T, class U = std::remove_const_t<T>>
 auto dynamic_buffer_requirements(U *__x = nullptr, const U *__const_x = nullptr,
                                  size_t __n = 0)
-    -> std::enable_if_t<stdx::conjunction<
+    -> std::enable_if_t<std::conjunction<
         // is copy constructible
         std::is_copy_constructible<U>,
         // has a const_buffers_type that's a const_buffer_sequence
@@ -675,7 +675,7 @@ class transfer_exactly {
    */
   size_t operator()(const std::error_code &ec, size_t n) const {
     // "unspecificed non-zero number"
-    size_t N = std::numeric_limits<size_t>::max();
+    constexpr size_t N = std::numeric_limits<size_t>::max();
 
     if (!ec && n < exact_) return std::min(exact_ - n, N);
 
@@ -858,8 +858,11 @@ read(SyncReadStream &stream, DynamicBuffer &&b, CompletionCondition cond) {
 
       // if socket was non-blocking and some bytes where already read, return
       // the success
-      if ((res.error() == std::errc::resource_unavailable_try_again ||
-           res.error() == net::stream_errc::eof) &&
+      const auto ec = res.error();
+      if ((ec == make_error_condition(
+                     std::errc::resource_unavailable_try_again) ||
+           ec == make_error_condition(std::errc::operation_would_block) ||
+           ec == net::stream_errc::eof) &&
           transferred != 0) {
         return transferred;
       }

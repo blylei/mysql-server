@@ -2,12 +2,12 @@
 .\"     Title: ndb_drop_table
 .\"    Author: [FIXME: author] [see http://docbook.sf.net/el/author]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 06/04/2021
+.\"      Date: 11/26/2021
 .\"    Manual: MySQL Database System
 .\"    Source: MySQL 8.0
 .\"  Language: English
 .\"
-.TH "NDB_DROP_TABLE" "1" "06/04/2021" "MySQL 8\&.0" "MySQL Database System"
+.TH "NDB_DROP_TABLE" "1" "11/26/2021" "MySQL 8\&.0" "MySQL Database System"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -124,9 +124,9 @@ T}:T{
 T}
 T{
 .PP
-\fB--connect-string=connection-string\fR,
+\fB--connect-string=connection_string\fR,
 .PP
-\fB \fR\fB-c\fR\fB \fR
+\fB \fR\fB-c connection_string\fR\fB \fR
 T}:T{
 Same as --ndb-connectstring
 T}:T{
@@ -144,9 +144,9 @@ T}:T{
 T}
 T{
 .PP
-\fB--database=dbname\fR,
+\fB--database=name\fR,
 .PP
-\fB-d\fR
+\fB-d name\fR
 T}:T{
 Name of database in which table is found
 T}:T{
@@ -202,9 +202,9 @@ T}:T{
 T}
 T{
 .PP
-\fB--ndb-connectstring=connection-string\fR,
+\fB--ndb-connectstring=connection_string\fR,
 .PP
-\fB \fR\fB-c\fR\fB \fR
+\fB \fR\fB-c connection_string\fR\fB \fR
 T}:T{
 Set connect string for connecting to ndb_mgmd. Syntax:
               "[nodeid=id;][host=]hostname[:port]". Overrides entries in
@@ -215,9 +215,9 @@ T}:T{
 T}
 T{
 .PP
-\fB--ndb-mgmd-host=connection-string\fR,
+\fB--ndb-mgmd-host=connection_string\fR,
 .PP
-\fB \fR\fB-c\fR\fB \fR
+\fB \fR\fB-c connection_string\fR\fB \fR
 T}:T{
 Same as --ndb-connectstring
 T}:T{
@@ -418,7 +418,7 @@ lB l.
 T{
 Command-Line Format
 T}:T{
---connect-string=connection-string
+--connect-string=connection_string
 T}
 T{
 Type
@@ -476,7 +476,7 @@ lB l.
 T{
 Command-Line Format
 T}:T{
---database=dbname
+--database=name
 T}
 T{
 Type
@@ -668,7 +668,7 @@ lB l.
 T{
 Command-Line Format
 T}:T{
---ndb-connectstring=connection-string
+--ndb-connectstring=connection_string
 T}
 T{
 Type
@@ -702,7 +702,7 @@ lB l.
 T{
 Command-Line Format
 T}:T{
---ndb-mgmd-host=connection-string
+--ndb-mgmd-host=connection_string
 T}
 T{
 Type
@@ -867,17 +867,6 @@ T}
 .sp 1
 Display version information and exit\&.
 .RE
-.PP
-Prior to NDB 8\&.0\&.17, an
-NDB
-table dropped using this utility persisted in the MySQL data dictionary but could not be dropped using
-DROP TABLE
-in the
-\fBmysql\fR
-client\&. In NDB 8\&.0\&.17 and later, such
-\(lqorphan\(rq
-tables can be dropped using
-DROP TABLE\&. (Bug #29125206, Bug #93672)
 .SH "COPYRIGHT"
 .br
 .PP

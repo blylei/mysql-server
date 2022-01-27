@@ -193,7 +193,7 @@ static bool unregister_status_variables() {
   @retval 0 on success, errorno on failure
 */
 static int mysqlbackup_backup_id_check(MYSQL_THD thd,
-                                       SYS_VAR *self MY_ATTRIBUTE((unused)),
+                                       SYS_VAR *self [[maybe_unused]],
                                        void *save,
                                        struct st_mysql_value *value) {
   if (!have_backup_admin_privilege(thd))
@@ -334,11 +334,14 @@ mysql_service_status_t mysqlbackup_init() {
   /* If failed before the last initialization succeeded, deinitialize. */
   switch (failpoint) {
     case 3:
-      unregister_status_variables(); /*FALLTHROUGH*/
+      unregister_status_variables();
+      [[fallthrough]];
     case 2:
-      unregister_system_variables(); /*FALLTHROUGH*/
+      unregister_system_variables();
+      [[fallthrough]];
     case 1:
-      deinitialize_log_service(); /*FALLTHROUGH*/
+      deinitialize_log_service();
+      [[fallthrough]];
     case 0:
       return (1);
   }
@@ -380,6 +383,7 @@ REQUIRES_SERVICE_PLACEHOLDER(component_sys_variable_unregister);
 REQUIRES_SERVICE_PLACEHOLDER(status_variable_registration);
 REQUIRES_SERVICE_PLACEHOLDER(udf_registration);
 REQUIRES_SERVICE_PLACEHOLDER(mysql_thd_security_context);
+REQUIRES_SERVICE_PLACEHOLDER(mysql_runtime_error);
 REQUIRES_SERVICE_PLACEHOLDER(mysql_security_context_options);
 REQUIRES_SERVICE_PLACEHOLDER(mysql_page_track);
 REQUIRES_SERVICE_PLACEHOLDER(global_grants_check);
@@ -399,6 +403,7 @@ REQUIRES_SERVICE(registry), REQUIRES_SERVICE(log_builtins),
     REQUIRES_SERVICE(status_variable_registration),
     REQUIRES_SERVICE(udf_registration),
     REQUIRES_SERVICE(mysql_thd_security_context),
+    REQUIRES_SERVICE(mysql_runtime_error),
     REQUIRES_SERVICE(mysql_security_context_options),
     REQUIRES_SERVICE(mysql_page_track), REQUIRES_SERVICE(global_grants_check),
     REQUIRES_SERVICE(mysql_current_thread_reader),

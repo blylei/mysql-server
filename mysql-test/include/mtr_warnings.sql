@@ -197,7 +197,7 @@ INSERT INTO global_suppressions VALUES
  ("slave SQL thread aborted"),
  ("Slave: .*Duplicate entry"),
 
- /* 
+ /*
     innodb_dedicated_server warning which raised if innodb_buffer_pool_size,
     innodb_log_file_size or innodb_flush_method is specified.
  */
@@ -312,6 +312,14 @@ INSERT INTO global_suppressions VALUES
  ("Members removed from the group.*"),
  ("Error while sending message for group replication recovery"),
  ("Slave SQL for channel 'group_replication_recovery': ... The slave coordinator and worker threads are .*"),
+ ("A message intended for a client cannot be sent there as no client-session is attached. Therefore, we're sending the information to the error-log instead: MY-001160 - Got an error writing communication packets.*"),
+ ("A message intended for a client cannot be sent there as no client-session is attached. Therefore, we're sending the information to the error-log instead: MY-001158 - Got an error reading communication packets.*"),
+ ("Failed to establish MySQL client connection in Group Replication.*."),
+ ("\\[GCS\\] client closed the signalling connection .*"),
+ ("\\[GCS\\] local_server: client closed the signalling connection.*"),
+ ("\\[GCS\\] local_server: error reading from the signalling connection.*"),
+ ("\\[GCS\\] Unable to start XCom Network Provider.*"),
+ ("\\[GCS\\] Error initializing the group communication engine.*"),
 
  /*
    Warnings/errors related to SSL connection by mysqlx
@@ -354,10 +362,6 @@ INSERT INTO global_suppressions VALUES
    Manifest file processing
  */
  ("Manifest file '.*' is not read-only. For better security, please make sure that the file is read-only."),
-
- /* TLS v1.0 and v1.1 deprecated */
- ("A deprecated TLS version TLSv1 is enabled for channel"),
- ("A deprecated TLS version TLSv1.1 is enabled for channel"),
 
  ("THE_LAST_SUPPRESSION");
 

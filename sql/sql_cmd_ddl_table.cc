@@ -101,6 +101,10 @@ static bool populate_table(THD *thd, LEX *lex) {
   if (lex->set_var_list.elements && resolve_var_assignments(thd, lex))
     return true;
 
+  // Use the hypergraph optimizer for the SELECT statement, if enabled.
+  lex->using_hypergraph_optimizer =
+      thd->optimizer_switch_flag(OPTIMIZER_SWITCH_HYPERGRAPH_OPTIMIZER);
+
   lex->set_exec_started();
 
   /*
@@ -111,7 +115,8 @@ static bool populate_table(THD *thd, LEX *lex) {
 
   if (lock_tables(thd, lex->query_tables, lex->table_count, 0)) return true;
 
-  if (unit->optimize(thd, nullptr, true)) return true;
+  if (unit->optimize(thd, nullptr, true, /*finalize_access_paths=*/true))
+    return true;
 
   // Calculate the current statement cost.
   accumulate_statement_cost(lex);

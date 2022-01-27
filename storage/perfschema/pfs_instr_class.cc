@@ -67,14 +67,6 @@
 bool pfs_enabled = true;
 
 /**
-  Global flag used to enable and disable SHOW PROCESSLIST in the
-  performance schema. This flag only takes effect if the performance schema
-  is configured to support SHOW PROCESSLIST.
-  @sa performance-schema-enable-processlist
-*/
-bool pfs_processlist_enabled = false;
-
-/**
   Global performance schema reference count for plugin and component events.
   Incremented when a shared library is being unloaded, decremented when
   the performance schema is finished processing the event.
@@ -1316,6 +1308,9 @@ PFS_cond_class *sanitize_cond_class(PFS_cond_class *unsafe) {
 */
 PFS_thread_key register_thread_class(const char *name, uint name_length,
                                      PSI_thread_info *info) {
+  assert(info != nullptr);
+  assert(info->m_os_name != nullptr);
+
   /* See comments in register_mutex_class */
   uint32 index;
   PFS_thread_class *entry;
@@ -1335,10 +1330,31 @@ PFS_thread_key register_thread_class(const char *name, uint name_length,
     entry->m_history = true;
 
     entry->enforce_valid_flags(PSI_FLAG_SINGLETON | PSI_FLAG_USER |
-                               PSI_FLAG_THREAD_SYSTEM);
+                               PSI_FLAG_THREAD_SYSTEM | PSI_FLAG_AUTO_SEQNUM |
+                               PSI_FLAG_NO_SEQNUM);
 
     configure_instr_class(entry);
     ++thread_class_allocated_count;
+
+    entry->m_seqnum.store(1);
+
+    if (entry->has_seqnum()) {
+      /*
+        Ensure room for "-%d" suffix with 2 digits minimum,
+        so that:
+        - the "-%d" format fits into the class
+        - the "-NN" suffix fits into the instance
+      */
+      assert(strlen(info->m_os_name) < PFS_MAX_OS_NAME_LENGTH - 3);
+
+      snprintf(entry->m_os_name, PFS_MAX_OS_NAME_LENGTH, "%s-%%d",
+               info->m_os_name);
+    } else {
+      assert(strlen(info->m_os_name) < PFS_MAX_OS_NAME_LENGTH);
+      strncpy(entry->m_os_name, info->m_os_name, PFS_MAX_OS_NAME_LENGTH);
+    }
+    entry->m_os_name[PFS_MAX_OS_NAME_LENGTH - 1] = '\0';
+
     return (index + 1);
   }
 
@@ -1620,7 +1636,8 @@ PFS_memory_key register_memory_class(const char *name, uint name_length,
                      PFS_CLASS_MEMORY);
     entry->m_event_name_index = index;
 
-    entry->enforce_valid_flags(PSI_FLAG_ONLY_GLOBAL_STAT);
+    entry->enforce_valid_flags(
+        (PSI_FLAG_ONLY_GLOBAL_STAT | PSI_FLAG_MEM_COLLECT));
 
     /* Set user-defined configuration options for this instrument */
     configure_instr_class(entry);

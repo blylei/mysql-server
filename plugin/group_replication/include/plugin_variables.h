@@ -39,16 +39,16 @@ struct plugin_local_variables {
   rpl_sidno view_change_sidno;
 
   mysql_mutex_t force_members_running_mutex;
-  mysql_mutex_t plugin_running_mutex;
   mysql_mutex_t plugin_online_mutex;
   mysql_mutex_t plugin_modules_termination_mutex;
+  mysql_mutex_t plugin_applier_module_initialize_terminate_mutex;
   mysql_cond_t plugin_online_condition;
   Plugin_waitlock *online_wait_mutex;
+  Checkable_rwlock *plugin_running_lock;
   Checkable_rwlock *plugin_stop_lock;
   std::atomic<bool> plugin_is_stopping;
   std::atomic<bool> group_replication_running;
   std::atomic<bool> group_replication_cloning;
-  std::atomic<bool> error_state_due_to_error_during_autorejoin;
 
   bool force_members_running;
   uint gr_lower_case_table_names;
@@ -63,8 +63,12 @@ struct plugin_local_variables {
   bool server_shutdown_status;
   bool wait_on_engine_initialization;
   int write_set_extraction_algorithm;
-  bool abort_wait_on_start_process;
+  enum_wait_on_start_process_result wait_on_start_process;
   bool recovery_timeout_issue_on_stop;
+  // The first argument indicates whether or not to use the value stored in this
+  // pair's second argument for the group_replication_paxos_single_leader sysvar
+  // or the actual value that's stored on the sysvar
+  std::pair<bool, bool> allow_single_leader_latch{false, true};
 
   // (60min / 5min) * 24 * 7, i.e. a week.
   const uint MAX_AUTOREJOIN_TRIES = 2016;
@@ -83,11 +87,11 @@ struct plugin_local_variables {
     view_change_sidno = 0;
 
     online_wait_mutex = nullptr;
+    plugin_running_lock = nullptr;
     plugin_stop_lock = nullptr;
     plugin_is_stopping = false;
     group_replication_running = false;
     group_replication_cloning = false;
-    error_state_due_to_error_during_autorejoin = false;
 
     force_members_running = false;
     gr_lower_case_table_names = 0;
@@ -102,7 +106,8 @@ struct plugin_local_variables {
     server_shutdown_status = false;
     wait_on_engine_initialization = false;
     write_set_extraction_algorithm = HASH_ALGORITHM_OFF;
-    abort_wait_on_start_process = false;
+    wait_on_start_process = WAIT_ON_START_PROCESS_SUCCESS;
+    allow_single_leader_latch.first = false;
     recovery_timeout_issue_on_stop = false;
     // the default is 5 minutes (300 secs).
     rejoin_timeout = 300ULL;
@@ -281,6 +286,15 @@ struct plugin_options_variables {
   ulong tls_source_var;
 
   char *view_change_uuid_var;
+
+  const char *communication_stack_source_values[3] = {"XCOM", "MYSQL",
+                                                      (char *)nullptr};
+  TYPELIB communication_stack_values_typelib_t = {
+      2, "communication_stack_typelib_t", communication_stack_source_values,
+      nullptr};
+  ulong communication_stack_var;
+
+  bool allow_single_leader_var{false};
 };
 
 #endif /* PLUGIN_VARIABLES_INCLUDE */

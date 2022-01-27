@@ -351,7 +351,7 @@ Diagnostics_area::Diagnostics_area(bool allow_unlimited_conditions)
   m_message_text[0] = '\0';
 }
 
-Diagnostics_area::~Diagnostics_area() { free_root(&m_condition_root, MYF(0)); }
+Diagnostics_area::~Diagnostics_area() { m_condition_root.Clear(); }
 
 void Diagnostics_area::reset_diagnostics_area() {
   DBUG_TRACE;
@@ -498,7 +498,7 @@ void Diagnostics_area::reset_condition_info(THD *thd) {
 
   m_conditions_list.clear();
   m_preexisting_sql_conditions.clear();
-  free_root(&m_condition_root, MYF(0));
+  m_condition_root.Clear();
   memset(m_current_statement_cond_count_by_qb, 0,
          sizeof(m_current_statement_cond_count_by_qb));
   m_current_statement_cond_count = 0;
@@ -970,6 +970,12 @@ bool is_sqlstate_valid(const LEX_STRING *sqlstate) {
   return true;
 }
 
+static bool is_deprecated(const char *cs_name) {
+  return strcmp(cs_name, "ucs2") == 0 || strcmp(cs_name, "macroman") == 0 ||
+         strcmp(cs_name, "macce") == 0 || strcmp(cs_name, "dec8") == 0 ||
+         strcmp(cs_name, "hp8") == 0;
+}
+
 /**
   Output warnings on deprecated character sets
 
@@ -993,6 +999,12 @@ void warn_on_deprecated_charset(THD *thd, const CHARSET_INFO *cs,
         LogErr(WARNING_LEVEL, ER_WARN_DEPRECATED_UTF8MB3_CHARSET_OPTION,
                option);
     }
+  } else if (is_deprecated(cs->csname)) {
+    if (option == nullptr)
+      push_deprecated_warn(thd, cs->csname, "utf8mb4");
+    else
+      LogErr(WARNING_LEVEL, ER_WARN_DEPRECATED_CHARSET_OPTION, option,
+             cs->csname, "utf8mb4");
   }
 }
 
@@ -1013,5 +1025,14 @@ void warn_on_deprecated_collation(THD *thd, const CHARSET_INFO *collation,
     else
       LogErr(WARNING_LEVEL, ER_WARN_DEPRECATED_UTF8MB3_COLLATION_OPTION, option,
              collation->name);
+  } else if (is_deprecated(collation->csname)) {
+    if (option == nullptr)
+      push_warning_printf(thd, Sql_condition::SL_WARNING,
+                          ER_WARN_DEPRECATED_COLLATION,
+                          ER_THD(thd, ER_WARN_DEPRECATED_COLLATION),
+                          collation->name, collation->csname, "utf8mb4");
+    else
+      LogErr(WARNING_LEVEL, ER_WARN_DEPRECATED_COLLATION_OPTION, option,
+             collation->name, collation->csname, "utf8mb4");
   }
 }

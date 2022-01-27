@@ -41,9 +41,9 @@
 #include "my_table_map.h"
 #include "sql/field.h"
 #include "sql/item.h"
+#include "sql/iterators/row_iterator.h"
 #include "sql/mem_root_array.h"
 #include "sql/opt_explain_format.h"  // Explain_sort_clause
-#include "sql/row_iterator.h"
 #include "sql/sql_executor.h"
 #include "sql/sql_lex.h"
 #include "sql/sql_list.h"
@@ -156,8 +156,6 @@ class JOIN {
   JOIN_TAB **best_ref{nullptr};
   /// mapping between table indexes and JOIN_TABs
   JOIN_TAB **map2table{nullptr};
-  ///< mapping between table indexes and QEB_TABs
-  QEP_TAB **map2qep_tab{nullptr};
   /*
     The table which has an index that allows to produce the requried ordering.
     A special value of 0x1 means that the ordering will be produced by
@@ -611,7 +609,7 @@ class JOIN {
   */
   bool plan_is_single_table() { return primary_tables - const_tables == 1; }
 
-  bool optimize();
+  bool optimize(bool finalize_access_paths);
   void reset();
   bool prepare_result();
   void destroy();
@@ -714,7 +712,7 @@ class JOIN {
  public:
   bool update_equalities_for_sjm();
   bool add_sorting_to_table(uint idx, ORDER_with_src *order,
-                            bool force_stable_sort, bool sort_before_group);
+                            bool sort_before_group);
   bool decide_subquery_strategy();
   void refine_best_rowcount();
   table_map calculate_deps_of_remaining_lateral_derived_tables(
@@ -787,6 +785,13 @@ class JOIN {
     When we get rid of slices entirely, we can get rid of this, too.
    */
   void refresh_base_slice();
+
+  /**
+    Whether this query block needs finalization (see
+    FinalizePlanForQueryBlock()) before it can be actually used.
+    This only happens when using the hypergraph join optimizer.
+   */
+  bool needs_finalize{false};
 
  private:
   bool optimized{false};  ///< flag to avoid double optimization in EXPLAIN
@@ -1003,6 +1008,7 @@ class JOIN {
   /** @{ Helpers for create_access_paths. */
   AccessPath *create_root_access_path_for_join();
   AccessPath *attach_access_paths_for_having_and_limit(AccessPath *path);
+  AccessPath *attach_access_path_for_delete(AccessPath *path);
   /** @} */
 
   /**
@@ -1183,7 +1189,7 @@ Item_equal *find_item_equal(COND_EQUAL *cond_equal,
   (ie., normally, if we do many, they will hit cache instead of being
   separate seeks). Given to find_cost_for_ref().
  */
-double find_worst_seeks(const Cost_model_table *cost_model, double num_rows,
+double find_worst_seeks(const TABLE *table, double num_rows,
                         double table_scan_cost);
 
 /**

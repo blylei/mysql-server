@@ -275,7 +275,8 @@ static void buf_dump(ibool obey_shutdown) {
       }
     }
 
-    dump = static_cast<buf_dump_t *>(ut_malloc_nokey(n_pages * sizeof(*dump)));
+    dump = static_cast<buf_dump_t *>(
+        ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY, n_pages * sizeof(*dump)));
 
     if (dump == nullptr) {
       mutex_exit(&buf_pool->LRU_list_mutex);
@@ -303,7 +304,7 @@ static void buf_dump(ibool obey_shutdown) {
       ret = fprintf(f, SPACE_ID_PF "," PAGE_NO_PF "\n", BUF_DUMP_SPACE(dump[j]),
                     BUF_DUMP_PAGE(dump[j]));
       if (ret < 0) {
-        ut_free(dump);
+        ut::free(dump);
         fclose(f);
         buf_dump_status(STATUS_ERR, "Cannot write to '%s': %s", tmp_filename,
                         strerror(errno));
@@ -319,7 +320,7 @@ static void buf_dump(ibool obey_shutdown) {
       }
     }
 
-    ut_free(dump);
+    ut::free(dump);
   }
 
   ret = fclose(f);
@@ -366,14 +367,15 @@ normal client queries.
 @param[in]	n_io			number of IO ops done since buffer
                                         pool load has started */
 static inline void buf_load_throttle_if_needed(
-    ib_time_monotonic_ms_t *last_check_time, ulint *last_activity_count,
-    ulint n_io) {
+    std::chrono::steady_clock::time_point *last_check_time,
+    ulint *last_activity_count, ulint n_io) {
   if (n_io % srv_io_capacity < srv_io_capacity - 1) {
     return;
   }
 
-  if (*last_check_time == 0 || *last_activity_count == 0) {
-    *last_check_time = ut_time_monotonic_ms();
+  if (*last_check_time == std::chrono::steady_clock::time_point{} ||
+      *last_activity_count == 0) {
+    *last_check_time = std::chrono::steady_clock::now();
     *last_activity_count = srv_get_activity_count();
     return;
   }
@@ -388,8 +390,7 @@ static inline void buf_load_throttle_if_needed(
 
   /* There has been other activity, throttle. */
 
-  const auto now = ut_time_monotonic_ms();
-  const auto elapsed_time = now - *last_check_time;
+  const auto elapsed_time = std::chrono::steady_clock::now() - *last_check_time;
 
   /* Notice that elapsed_time is not the time for the last
   srv_io_capacity IO operations performed by BP load. It is the
@@ -410,11 +411,11 @@ static inline void buf_load_throttle_if_needed(
   "cur_activity_count == *last_activity_count" check and calling
   ut_time_monotonic_ms() that often may turn out to be too expensive. */
 
-  if (elapsed_time < 1000 /* 1 sec (1000 milli secs) */) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000 - elapsed_time));
+  if (elapsed_time < std::chrono::seconds{1}) {
+    std::this_thread::sleep_for(std::chrono::seconds{1} - elapsed_time);
   }
 
-  *last_check_time = ut_time_monotonic_ms();
+  *last_check_time = std::chrono::steady_clock::now();
   *last_activity_count = srv_get_activity_count();
 }
 
@@ -484,7 +485,8 @@ static void buf_load() {
   }
 
   if (dump_n != 0) {
-    dump = static_cast<buf_dump_t *>(ut_malloc_nokey(dump_n * sizeof(*dump)));
+    dump = static_cast<buf_dump_t *>(
+        ut::malloc_withkey(UT_NEW_THIS_FILE_PSI_KEY, dump_n * sizeof(*dump)));
   } else {
     fclose(f);
     ut_sprintf_timestamp(now);
@@ -513,7 +515,7 @@ static void buf_load() {
       }
       /* else */
 
-      ut_free(dump);
+      ut::free(dump);
       fclose(f);
       buf_load_status(STATUS_ERR,
                       "Error parsing '%s', unable"
@@ -523,7 +525,7 @@ static void buf_load() {
     }
 
     if (space_id > ULINT32_MASK || page_no > ULINT32_MASK) {
-      ut_free(dump);
+      ut::free(dump);
       fclose(f);
       buf_load_status(STATUS_ERR,
                       "Error parsing '%s': bogus"
@@ -545,7 +547,7 @@ static void buf_load() {
   fclose(f);
 
   if (dump_n == 0) {
-    ut_free(dump);
+    ut::free(dump);
     ut_sprintf_timestamp(now);
     buf_load_status(STATUS_INFO,
                     "Buffer pool(s) load completed at %s"
@@ -558,7 +560,7 @@ static void buf_load() {
     std::sort(dump, dump + dump_n);
   }
 
-  ib_time_monotonic_ms_t last_check_time = 0;
+  std::chrono::steady_clock::time_point last_check_time;
   ulint last_activity_cnt = 0;
 
   /* Avoid calling the expensive fil_space_acquire_silent() for each
@@ -622,7 +624,7 @@ static void buf_load() {
         fil_space_release(space);
       }
       buf_load_abort_flag = FALSE;
-      ut_free(dump);
+      ut::free(dump);
       buf_load_status(STATUS_INFO, "Buffer pool(s) load aborted on request");
       /* Premature end, set estimated = completed = i and
       end the current stage event. */
@@ -641,7 +643,7 @@ static void buf_load() {
     fil_space_release(space);
   }
 
-  ut_free(dump);
+  ut::free(dump);
 
   ut_sprintf_timestamp(now);
 

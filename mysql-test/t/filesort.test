@@ -174,3 +174,39 @@ CREATE TABLE t1 (a LONGTEXT);
 INSERT INTO t1 VALUES ('8');
 SELECT 'a' AS f1 FROM t1 WHERE a='8' GROUP BY f1 ORDER BY CONCAT(f1);
 DROP TABLE t1;
+
+--echo #
+--echo # Bug #33030289 REGRESSION: ASSERTION `REC_SZ <= M_ELEMENT_SIZE' FAILED.
+--echo #
+
+CREATE TABLE t(a DECIMAL(55,19) NOT NULL);
+INSERT INTO t VALUES(0),(1),(2),(3),(4),(5);
+--error ER_GIS_INVALID_DATA
+SELECT
+(
+  SELECT 1 FROM t
+  ORDER BY ST_HAUSDORFFDISTANCE(a, ST_ASTEXT(1,'axis-order=lat-long')), a
+  LIMIT 1
+);
+DROP TABLE t;
+
+--echo #
+--echo # Bug #32738705: "OUT OF SORT MEMORY ERROR" HAS AN INCONSISTENT RELATIONSHIP WITH THE BUFFER SIZE
+--echo #
+
+CREATE TABLE t1 ( a INTEGER, b TEXT );
+INSERT INTO t1 VALUES (1, REPEAT('x', 40001));
+INSERT INTO t1 VALUES (2, REPEAT('x', 40002));
+INSERT INTO t1 VALUES (3, REPEAT('x', 40003));
+INSERT INTO t1 VALUES (4, REPEAT('x', 40005));
+INSERT INTO t1 VALUES (5, REPEAT('x', 40008));
+INSERT INTO t1 VALUES (6, REPEAT('x', 40013));
+
+# Set up a sort with large addons (since b is TEXT and not HUGETEXT,
+# it's treated as a packed addon). We can keep one row and then some
+# in the sort buffer, but not two, so we need special handling during merging.
+SET sort_buffer_size=65536;
+SELECT a, LENGTH(b) FROM t1 ORDER BY a DESC;
+SET sort_buffer_size=DEFAULT;
+
+DROP TABLE t1;

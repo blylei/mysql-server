@@ -35,7 +35,6 @@
 
 #include <signaldata/ListTables.hpp>
 #include <signaldata/GetTabInfo.hpp>
-#include <signaldata/GetTableId.hpp>
 #include <signaldata/DictTabInfo.hpp>
 #include <signaldata/SumaImpl.hpp>
 #include <signaldata/ScanFrag.hpp>
@@ -1193,6 +1192,7 @@ void Suma::execAPI_FAILREQ(Signal* signal)
   jamEntry();
   DBUG_ENTER("Suma::execAPI_FAILREQ");
   Uint32 failedApiNode = signal->theData[0];
+  ndbrequire(failedApiNode < MAX_NODES);
   ndbrequire(signal->theData[1] == QMGR_REF); // As callback hard-codes QMGR
 
   c_connected_nodes.clear(failedApiNode);
@@ -1280,6 +1280,8 @@ Suma::api_fail_gci_list(Signal* signal, Uint32 nodeId)
 {
   jam();
 
+  ndbrequire(nodeId < MAX_NODES);
+
   Ptr<Gcp_record> gcp;
   if (c_gcp_list.first(gcp))
   {
@@ -1341,6 +1343,8 @@ Suma::api_fail_subscriber_list(Signal* signal, Uint32 nodeId)
 {
   jam();
   Ptr<SubOpRecord> subOpPtr;
+
+  ndbrequire(nodeId < MAX_NODES);
 
   if (c_outstanding_drop_trig_req > NDB_MAX_SUMA_DROP_TRIG_REQ_APIFAIL)
   {
@@ -3605,6 +3609,7 @@ Suma::execSUB_START_REQ(Signal* signal){
     if (!ERROR_INSERTED_CLEAR(13047))
       break;
     // Fall through - if error inserted
+    [[fallthrough]];
   default:
     /**
      * This can happen if we start...with a new config
@@ -4600,6 +4605,7 @@ Suma::execTRANSID_AI(Signal* signal)
     SegmentedSectionPtr dataPtr;
     handle.getSection(dataPtr, 0);
     length = dataPtr.sz;
+    ndbrequire(length <= (NDB_ARRAY_SIZE(signal->theData) - TransIdAI::HeaderLength));
     copy(data->attrData, dataPtr);
     releaseSections(handle);
   }
@@ -4614,8 +4620,10 @@ Suma::execTRANSID_AI(Signal* signal)
   
   const Uint32 attribs = syncPtr.p->m_currentNoOfAttributes;
   for(Uint32 i = 0; i<attribs; i++){
+    ndbrequire(src < end);
     Uint32 tmp = * src++;
     Uint32 len = AttributeHeader::getDataSize(tmp);
+    ndbrequire((src + len) <= end);
     
     /**
      * Separate AttributeHeaders and data in separate
@@ -4766,6 +4774,7 @@ Suma::execTRIG_ATTRINFO(Signal* signal)
 
     ndbrequire( checkTriggerBufferLock(trigId) );
 
+    ndbrequire(b_trigBufferSize + dataLen <= SUMA_BUF_SZ);
     memcpy(b_buffer + b_trigBufferSize, trg->getData(), 4 * dataLen);
     b_trigBufferSize += dataLen;
 
@@ -4785,6 +4794,7 @@ Suma::execTRIG_ATTRINFO(Signal* signal)
       ndbrequire( checkTriggerBufferLock(trigId) );
     }
 
+    ndbrequire(f_trigBufferSize + dataLen <= SUMA_BUF_SZ);
     memcpy(f_buffer + f_trigBufferSize, trg->getData(), 4 * dataLen);
     f_trigBufferSize += dataLen;
   }
@@ -4805,7 +4815,8 @@ Suma::get_responsible_node(Uint32 bucket) const
 
   jam();
   Uint32 node;
-  const Bucket* ptr= c_buckets + bucket;
+  ndbrequire(bucket < NO_OF_BUCKETS);
+  const Bucket* ptr = c_buckets + bucket;
   for(Uint32 i = 0; i<MAX_REPLICAS; i++)
   {
     node= ptr->m_nodes[i];
@@ -4828,7 +4839,8 @@ Suma::get_responsible_node(Uint32 bucket, const NdbNodeBitmask& mask) const
 {
   jam();
   Uint32 node;
-  const Bucket* ptr= c_buckets + bucket;
+  ndbrequire(bucket < NO_OF_BUCKETS);
+  const Bucket* ptr = c_buckets + bucket;
   for(Uint32 i = 0; i<MAX_REPLICAS; i++)
   {
     node= ptr->m_nodes[i];
@@ -5052,18 +5064,21 @@ Suma::execFIRE_TRIG_ORD(Signal* signal)
 
     SegmentedSectionPtr ptr;
     handle.getSection(ptr, 0); // Keys
-    Uint32 sz = ptr.sz;
+    const Uint32 sz = ptr.sz;
+    ndbrequire(sz <= SUMA_BUF_SZ);
     copy(f_buffer, ptr);
     lsptr[0].sz = ptr.sz;
     lsptr[0].p = f_buffer;
 
     handle.getSection(ptr, 2); // After values
+    ndbrequire(ptr.sz <= (SUMA_BUF_SZ - sz));
     copy(f_buffer + sz, ptr);
     f_trigBufferSize = sz + ptr.sz;
     lsptr[2].sz = ptr.sz;
     lsptr[2].p = f_buffer + sz;
 
     handle.getSection(ptr, 1); // Before values
+    ndbrequire(ptr.sz <= SUMA_BUF_SZ);
     copy(b_buffer, ptr);
     b_trigBufferSize = ptr.sz;
     lsptr[1].sz = ptr.sz;
@@ -6320,7 +6335,7 @@ do_release:
     case Table::DEFINED:
       jam();
       c_tables.remove(tabPtr);
-      // Fall through
+      [[fallthrough]];
     case Table::DROPPED:
       jam();
       tabPtr.p->release(* this);
@@ -6946,7 +6961,8 @@ Suma::get_buffer_ptr(Signal* signal, Uint32 buck, Uint64 gci, Uint32 sz, Uint32 
 {
   jam();
   sz += 1; // len
-  Bucket* bucket= c_buckets+buck;
+  ndbrequire(buck < NO_OF_BUCKETS);
+  Bucket* bucket = c_buckets + buck;
   Page_pos pos= bucket->m_buffer_head;
 
   Buffer_page* page = 0;
@@ -7067,7 +7083,8 @@ Suma::out_of_buffer(Signal* signal)
 void
 Suma::out_of_buffer_release(Signal* signal, Uint32 buck)
 {
-  Bucket* bucket= c_buckets+buck;
+  ndbrequire(buck < NO_OF_BUCKETS);
+  Bucket* bucket = c_buckets + buck;
   Uint32 tail= bucket->m_buffer_tail;
   
   if(tail != RNIL)
@@ -7181,7 +7198,8 @@ Suma::free_page(Uint32 page_id, Buffer_page* page)
 void
 Suma::release_gci(Signal* signal, Uint32 buck, Uint64 gci)
 {
-  Bucket* bucket= c_buckets+buck;
+  ndbrequire(buck < NO_OF_BUCKETS);
+  Bucket* bucket = c_buckets + buck;
   Uint32 tail= bucket->m_buffer_tail;
   Page_pos head= bucket->m_buffer_head;
   Uint64 max_acked = bucket->m_max_acked_gci;
@@ -7267,7 +7285,8 @@ Suma::start_resend(Signal* signal, Uint32 buck)
   /**
    * Resend from m_max_acked_gci + 1 until max_gci + 1
    */
-  Bucket* bucket= c_buckets + buck;
+  ndbrequire(buck < NO_OF_BUCKETS);
+  Bucket* bucket = c_buckets + buck;
   Page_pos pos= bucket->m_buffer_head;
 
   if(m_out_of_buffer_gci)
@@ -7338,7 +7357,8 @@ void
 Suma::resend_bucket(Signal* signal, Uint32 buck, Uint64 min_gci,
 		    Uint32 pos, Uint64 last_gci)
 {
-  Bucket* bucket= c_buckets+buck;
+  ndbrequire(buck < NO_OF_BUCKETS);
+  Bucket* bucket = c_buckets + buck;
   Uint32 tail= bucket->m_buffer_tail;
 
   Buffer_page* page= c_page_pool.getPtr(tail);

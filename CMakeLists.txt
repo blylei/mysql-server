@@ -23,8 +23,8 @@
 MESSAGE(STATUS "Running cmake version ${CMAKE_VERSION}")
 
 IF(WIN32)
-  # CMake 3.8.0 is needed for Visual Studio 2017 and x64 toolset.
-  CMAKE_MINIMUM_REQUIRED(VERSION 3.8.0)
+  # Load policies. This is needed in order to parse the wmic version check.
+  CMAKE_MINIMUM_REQUIRED(VERSION 3.5.1)
   EXECUTE_PROCESS(COMMAND wmic os get version
     OUTPUT_VARIABLE NT_RELEASE_VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -233,6 +233,10 @@ ENDIF()
 CMAKE_MINIMUM_REQUIRED(VERSION 3.5.1)
 INCLUDE(cmake_policies NO_POLICY_SCOPE)
 
+IF(MY_HOST_SYSTEM_NAME MATCHES "SunOS")
+  SET(SOLARIS 1)
+ENDIF()
+
 IF(MY_HOST_SYSTEM_NAME MATCHES "Linux")
   # Trust 'rpm -qf /' rather than 'uname -s'
   STRING(REGEX MATCH "\\.el([678])\\." MATCH_FSYS "${MY_HOST_FILESYSTEM_NAME}")
@@ -255,6 +259,14 @@ IF(NOT LINUX_RHEL AND MY_HOST_SYSTEM_NAME MATCHES "Linux")
         SET(LINUX_UBUNTU_16_04 1)
       ELSEIF(MY_OS_RELEASE MATCHES "18.04")
         SET(LINUX_UBUNTU_18_04 1)
+      ENDIF()
+      # /etc/os-release contains a line like
+      # VERSION_ID="20.04"
+      # Match the numeric value, including the dot, ignore the rest:
+      STRING(REGEX MATCH
+        "VERSION_ID=\"([0-9\\.]+).*" UNUSED ${MY_OS_RELEASE})
+      IF(CMAKE_MATCH_1)
+        SET(LINUX_UBUNTU_VERSION_ID ${CMAKE_MATCH_1})
       ENDIF()
     ENDIF()
   ENDIF()
@@ -300,20 +312,52 @@ IF(CMAKE_HOST_UNIX AND NOT FORCE_UNSUPPORTED_COMPILER
         FIND_PROGRAM(ALTERNATIVE_GPP g++
           NO_DEFAULT_PATH
           PATHS "${OPT_PATH}/root/usr/bin")
+        FIND_PROGRAM(ALTERNATIVE_LD ld
+          NO_DEFAULT_PATH
+          PATHS "${OPT_PATH}/root/usr/bin")
+        FIND_PROGRAM(ALTERNATIVE_AR ar
+          NO_DEFAULT_PATH
+          PATHS "${OPT_PATH}/root/usr/bin")
+        FIND_PROGRAM(ALTERNATIVE_RANLIB ranlib
+          NO_DEFAULT_PATH
+          PATHS "${OPT_PATH}/root/usr/bin")
         FIND_PROGRAM(ALTERNATIVE_ENABLE enable
           NO_DEFAULT_PATH
           PATHS "${OPT_PATH}")
       ENDFOREACH()
-      IF(ALTERNATIVE_GCC AND ALTERNATIVE_GPP)
+      # A missing ALTERNATIVE_LD may generate bad executables.
+      IF(ALTERNATIVE_GCC AND ALTERNATIVE_GPP AND ALTERNATIVE_LD)
         SET(CMAKE_C_COMPILER ${ALTERNATIVE_GCC})
         SET(CMAKE_CXX_COMPILER ${ALTERNATIVE_GPP})
+        SET(CMAKE_LINKER ${ALTERNATIVE_LD})
+        SET(CMAKE_LINKER ${ALTERNATIVE_LD} CACHE PATH "Alternative ld")
+        IF(ALTERNATIVE_AR)
+          SET(CMAKE_AR ${ALTERNATIVE_AR})
+          SET(CMAKE_AR ${ALTERNATIVE_AR} CACHE PATH "Alternative ar")
+        ENDIF()
+        IF(ALTERNATIVE_RANLIB)
+          SET(CMAKE_RANLIB ${ALTERNATIVE_RANLIB})
+          SET(CMAKE_RANLIB ${ALTERNATIVE_RANLIB} CACHE PATH "Alternative ranlib")
+        ENDIF()
         MESSAGE(STATUS "Using ${ALTERNATIVE_GCC}")
         MESSAGE(STATUS "Using ${ALTERNATIVE_GPP}")
       ELSE()
+        IF(LINUX_RHEL6)
+          SET(DEV_PACKAGES
+            "devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-binutils")
+        ELSEIF(LINUX_RHEL7)
+          SET(DEV_PACKAGES
+            "devtoolset-10-gcc devtoolset-10-gcc-c++ devtoolset-10-binutils")
+        ELSEIF(LINUX_RHEL8)
+          SET(DEV_PACKAGES
+            "gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ gcc-toolset-10-binutils")
+        ENDIF()
         MESSAGE(WARNING
-          "Could not find devtoolset compiler in ${ALTERNATIVE_PATHS}")
+          "Could not find devtoolset compiler/linker in ${ALTERNATIVE_PATHS}")
+        MESSAGE(WARNING "You need to install the required packages:\n"
+          " yum install ${DEV_PACKAGES}\n")
         MESSAGE(FATAL_ERROR
-          "Please set CMAKE_C_COMPILER and CMAKE_CXX_COMPILER explicitly.")
+          "Or you can set CMAKE_C_COMPILER and CMAKE_CXX_COMPILER explicitly.")
       ENDIF()
 
     ELSEIF(LINUX_UBUNTU_18_04)
@@ -324,6 +368,20 @@ IF(CMAKE_HOST_UNIX AND NOT FORCE_UNSUPPORTED_COMPILER
       FIND_PROGRAM(ALTERNATIVE_GPP g++-8
         NO_DEFAULT_PATH
         PATHS "/usr/bin")
+      FIND_PROGRAM(GCC_AR_EXECUTABLE gcc-ar-8
+        NO_DEFAULT_PATH
+        PATHS "/usr/bin")
+      FIND_PROGRAM(GCC_RANLIB_EXECUTABLE gcc-ranlib-8
+        NO_DEFAULT_PATH
+        PATHS "/usr/bin")
+      IF(GCC_AR_EXECUTABLE)
+        SET(CMAKE_AR ${GCC_AR_EXECUTABLE})
+        SET(CMAKE_AR ${GCC_AR_EXECUTABLE} CACHE PATH "Alternative ar")
+      ENDIF()
+      IF(GCC_RANLIB_EXECUTABLE)
+        SET(CMAKE_RANLIB ${GCC_RANLIB_EXECUTABLE})
+        SET(CMAKE_RANLIB ${GCC_RANLIB_EXECUTABLE} CACHE PATH "Alternative ranlib")
+      ENDIF()
       IF (ALTERNATIVE_GCC AND ALTERNATIVE_GPP)
         SET(CMAKE_C_COMPILER ${ALTERNATIVE_GCC})
         SET(CMAKE_CXX_COMPILER ${ALTERNATIVE_GPP})
@@ -345,6 +403,12 @@ IF(CMAKE_HOST_UNIX AND NOT FORCE_UNSUPPORTED_COMPILER
         FIND_PROGRAM(ALTERNATIVE_GPP g++-10
           NO_DEFAULT_PATH
           PATHS "/usr/bin")
+        FIND_PROGRAM(GCC_AR_EXECUTABLE gcc-ar-10
+          NO_DEFAULT_PATH
+          PATHS "/usr/bin")
+        FIND_PROGRAM(GCC_RANLIB_EXECUTABLE gcc-ranlib-10
+          NO_DEFAULT_PATH
+          PATHS "/usr/bin")
       ELSEIF(LINUX_SUSE_15)
         FIND_PROGRAM(ALTERNATIVE_GCC gcc-9
           NO_DEFAULT_PATH
@@ -352,6 +416,20 @@ IF(CMAKE_HOST_UNIX AND NOT FORCE_UNSUPPORTED_COMPILER
         FIND_PROGRAM(ALTERNATIVE_GPP g++-9
           NO_DEFAULT_PATH
           PATHS "/usr/bin")
+        FIND_PROGRAM(GCC_AR_EXECUTABLE gcc-ar-9
+          NO_DEFAULT_PATH
+          PATHS "/usr/bin")
+        FIND_PROGRAM(GCC_RANLIB_EXECUTABLE gcc-ranlib-9
+          NO_DEFAULT_PATH
+          PATHS "/usr/bin")
+      ENDIF()
+      IF(GCC_AR_EXECUTABLE)
+        SET(CMAKE_AR ${GCC_AR_EXECUTABLE})
+        SET(CMAKE_AR ${GCC_AR_EXECUTABLE} CACHE PATH "Alternative ar")
+      ENDIF()
+      IF(GCC_RANLIB_EXECUTABLE)
+        SET(CMAKE_RANLIB ${GCC_RANLIB_EXECUTABLE})
+        SET(CMAKE_RANLIB ${GCC_RANLIB_EXECUTABLE} CACHE PATH "Alternative ranlib")
       ENDIF()
       IF (ALTERNATIVE_GCC AND ALTERNATIVE_GPP)
         SET(CMAKE_C_COMPILER ${ALTERNATIVE_GCC})
@@ -372,6 +450,22 @@ IF(CMAKE_HOST_UNIX AND NOT FORCE_UNSUPPORTED_COMPILER
           MESSAGE(FATAL_ERROR "Please do zypper install gcc9 gcc9-c++\n"
             "or set CMAKE_C_COMPILER and CMAKE_CXX_COMPILER explicitly.")
         ENDIF()
+      ENDIF()
+    ELSEIF(SOLARIS)
+      MESSAGE(STATUS "Looking for GCC 10 on Solaris.")
+      FIND_PROGRAM(ALTERNATIVE_GCC gcc
+        NO_DEFAULT_PATH
+        PATHS "/usr/gcc/10/bin")
+      FIND_PROGRAM(ALTERNATIVE_GPP g++
+        NO_DEFAULT_PATH
+        PATHS "/usr/gcc/10/bin")
+      IF (ALTERNATIVE_GCC AND ALTERNATIVE_GPP)
+        SET(CMAKE_C_COMPILER ${ALTERNATIVE_GCC})
+        SET(CMAKE_CXX_COMPILER ${ALTERNATIVE_GPP})
+        MESSAGE(STATUS "Using ${ALTERNATIVE_GCC}")
+        MESSAGE(STATUS "Using ${ALTERNATIVE_GPP}")
+      ELSE()
+        MESSAGE(WARNING "Could not find /usr/gcc/10/bin/gcc")
       ENDIF()
     ENDIF()
   ENDIF()
@@ -593,11 +687,14 @@ INCLUDE(install_layout)
 
 # Add RPM or DEB platform flags for STANDALONE build.
 # Not for DEBUG builds, since both platforms use -O2 and _FORTIFY_SOURCE.
+# Not for Release or MinSizeRel, it will inflate binary sizes.
 IF(LINUX_STANDALONE AND (LINUX_DEB_PLATFORM OR LINUX_RPM_PLATFORM))
   IF(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG" OR WITH_DEBUG)
     SET(WITH_PACKAGE_FLAGS_DEFAULT OFF)
-  ELSE()
+  ELSEIF(CMAKE_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
     SET(WITH_PACKAGE_FLAGS_DEFAULT ON)
+  ELSE()
+    SET(WITH_PACKAGE_FLAGS_DEFAULT OFF)
   ENDIF()
   OPTION(WITH_PACKAGE_FLAGS
     "Use DEB/RPM compiler flags" ${WITH_PACKAGE_FLAGS_DEFAULT})
@@ -628,9 +725,22 @@ IF(WITH_DEFAULT_COMPILER_OPTIONS)
   INCLUDE(${CMAKE_SOURCE_DIR}/cmake/build_configurations/compiler_options.cmake)
 ENDIF()
 
+# Set correct search path for executables, libraries, and data files.
+IF(LINUX_RHEL)
+  IF(ALTERNATIVE_GCC)
+    GET_FILENAME_COMPONENT(GCC_B_PREFIX ${ALTERNATIVE_GCC} DIRECTORY)
+    STRING_PREPEND(CMAKE_C_FLAGS "-B${GCC_B_PREFIX} ")
+  ENDIF()
+  IF(ALTERNATIVE_GPP)
+    GET_FILENAME_COMPONENT(GPP_B_PREFIX ${ALTERNATIVE_GPP} DIRECTORY)
+    STRING_PREPEND(CMAKE_CXX_FLAGS "-B${GPP_B_PREFIX} ")
+  ENDIF()
+ENDIF()
+
 INCLUDE(CMakePushCheckState)
 
 # Add macros
+INCLUDE(add_custom_target)
 INCLUDE(pkg-config)
 INCLUDE(character_sets)
 INCLUDE(cmake_parse_arguments)
@@ -660,7 +770,7 @@ INCLUDE(curl)
 INCLUDE(rapidjson)
 INCLUDE(fprofile)
 INCLUDE(gloves)
-
+INCLUDE(fido2)
 
 IF(UNIX)
   OPTION(WITH_VALGRIND "Valgrind instrumentation" OFF)
@@ -736,10 +846,21 @@ OPTION(WITH_AUTHENTICATION_KERBEROS
   "Report error if the Kerberos authentication plugin cannot be built."
   ${WITH_AUTHENTICATION_KERBEROS_DEFAULT})
 
+IF(WITH_INTERNAL AND (NOT SOLARIS))
+  SET(WITH_AUTHENTICATION_FIDO_DEFAULT ON)
+ELSE()
+  SET(WITH_AUTHENTICATION_FIDO_DEFAULT OFF)
+ENDIF()
+
+OPTION(WITH_AUTHENTICATION_FIDO
+  "Report error if the FIDO authentication plugin cannot be built."
+  ${WITH_AUTHENTICATION_FIDO_DEFAULT})
+
 # Default ON if we are building server-side plugins.
 # Also default ON in pushbuild, for our community builds.
 IF(WITH_AUTHENTICATION_KERBEROS OR
     WITH_AUTHENTICATION_LDAP OR
+    WITH_AUTHENTICATION_FIDO OR
     DEFINED ENV{PB2WORKDIR})
   SET(WITH_AUTHENTICATION_CLIENT_PLUGINS_DEFAULT ON)
 ELSE()
@@ -751,6 +872,8 @@ ENDIF()
 #   authentication_kerberos_client.so
 # The LDAP client authentication plugin
 #   authentication_ldap_sasl_client.so
+# The FIDO client authentication plugin
+#   authentication_fido_client.so
 OPTION(WITH_AUTHENTICATION_CLIENT_PLUGINS
   "Build client-side authentication plugins, even if server-side are disabled"
   ${WITH_AUTHENTICATION_CLIENT_PLUGINS_DEFAULT})
@@ -856,6 +979,19 @@ FUNCTION(MY_CHECK_CXX_COMPILER_WARNING WARNING_OPTION RETURN_VALUE)
     SET(${RETURN_VALUE} 0 PARENT_SCOPE)
   ENDIF()
 ENDFUNCTION()
+
+# When builing with PGO, GCC will report -Wmissing-profile when compiling
+# files for which it cannot find profile data. It is valid to disable
+# this warning for files we are not currently interested in profiling.
+MACRO(DISABLE_MISSING_PROFILE_WARNING)
+  IF(FPROFILE_USE)
+    MY_CHECK_CXX_COMPILER_WARNING("-Wmissing-profile" HAS_WARN_FLAG)
+    IF(HAS_WARN_FLAG)
+      STRING_APPEND(CMAKE_C_FLAGS   " ${HAS_WARN_FLAG}")
+      STRING_APPEND(CMAKE_CXX_FLAGS " ${HAS_WARN_FLAG}")
+    ENDIF()
+  ENDIF()
+ENDMACRO()
 
 MACRO(MY_SANITIZER_CHECK SAN_OPT ADD_OPTIMIZATION RESULT)
   MY_CHECK_C_COMPILER_FLAG("${SAN_OPT}" C_RESULT)
@@ -1188,8 +1324,12 @@ IF(REPRODUCIBLE_BUILD)
   STRING_APPEND(CMAKE_C_FLAGS   " ${DEBUG_PREFIX_FLAGS}")
   STRING_APPEND(CMAKE_CXX_FLAGS " ${DEBUG_PREFIX_FLAGS}")
 
-  STRING_APPEND(CMAKE_C_LINK_FLAGS " -Wl,--build-id=none")
-  STRING_APPEND(CMAKE_CXX_LINK_FLAGS " -Wl,--build-id=none")
+  # DEB/RPM will want to set build id.
+  IF(INSTALL_LAYOUT MATCHES "STANDALONE" OR INSTALL_LAYOUT MATCHES "TARGZ")
+    STRING_APPEND(CMAKE_C_LINK_FLAGS " -Wl,--build-id=none")
+    STRING_APPEND(CMAKE_CXX_LINK_FLAGS " -Wl,--build-id=none")
+  ENDIF()
+
   SET(BISON_NO_LINE_OPT "--no-lines")
 
   SET_PROPERTY(GLOBAL PROPERTY RULE_LAUNCH_COMPILE
@@ -1412,11 +1552,21 @@ SET(SYSTEM_LIBRARIES
   SSL
   ZLIB
   ZSTD
+  FIDO
   )
 
 SET(WITH_SYSTEM_LIBS_DEFAULT OFF)
 OPTION(WITH_SYSTEM_LIBS
   "Use -DWITH_XXX=system for ${SYSTEM_LIBRARIES}" ${WITH_SYSTEM_LIBS_DEFAULT})
+
+# undefined symbol: _Z15fido_assert_newv which is fido_assert_new()
+# /usr/include/fido.h is missing 'extern "C"'
+# but even if we fix that, tests will fail.
+IF(LINUX_UBUNTU)
+  IF(LINUX_UBUNTU_VERSION_ID VERSION_LESS "21.04")
+    LIST(REMOVE_ITEM SYSTEM_LIBRARIES FIDO)
+  ENDIF()
+ENDIF()
 
 GET_CMAKE_PROPERTY(CACHE_VARS CACHE_VARIABLES)
 UNSET(COMMAND_LINE_VARS)
@@ -1591,11 +1741,38 @@ ENDIF()
 # Add RapidJSON library.
 MYSQL_CHECK_RAPIDJSON()
 
+# Look for fido2 library
+MYSQL_CHECK_FIDO()
+MYSQL_CHECK_FIDO_DLLS()
+
+IF(WITH_AUTHENTICATION_FIDO OR WITH_AUTHENTICATION_CLIENT_PLUGINS)
+  IF(WITH_FIDO STREQUAL "system" AND
+    NOT WITH_SSL STREQUAL "system")
+      MESSAGE(WARNING "-DWITH_AUTHENTICATION_FIDO=ON")
+      MESSAGE(FATAL_ERROR "Inconsistent options for FIDO/SSL")
+  ENDIF()
+
+  # FIDO (or libudev) missing, warn about what is missing, and break the build.
+  IF(WITH_AUTHENTICATION_FIDO AND NOT FIDO_FOUND)
+    SET(UDEV_WARN_MISSING)
+    SET(FIDO_WARN_MISSING)
+    WARN_MISSING_SYSTEM_UDEV(UDEV_WARN_MISSING)
+    WARN_MISSING_SYSTEM_FIDO(FIDO_WARN_MISSING)
+    MESSAGE(FATAL_ERROR
+      "-DWITH_AUTHENTICATION_FIDO=ON, but missing required libraries")
+  ENDIF()
+ENDIF()
+
 MACRO(MY_INCLUDE_SYSTEM_DIRECTORIES LIBRARY)
   IF(${WITH_${LIBRARY}} STREQUAL "bundled")
     SET(BEFORE_OR_AFTER "BEFORE")
   ELSE()
     SET(BEFORE_OR_AFTER "AFTER")
+  ENDIF()
+
+  # ICU headers for WIN32 need extra info about their libs state
+  IF(WIN32 AND ${LIBRARY} STREQUAL "ICU")
+    ADD_DEFINITIONS(-DU_STATIC_IMPLEMENTATION)
   ENDIF()
 
   IF(DEFINED ${LIBRARY}_INCLUDE_DIRS)
@@ -1640,11 +1817,33 @@ IF(LINUX)
   HAVE_PTHREAD_SETNAME_NP)
 ENDIF()
 
-IF(WITH_PROTOBUF STREQUAL "bundled")
+IF(WITH_PROTOBUF STREQUAL "bundled" OR WITH_FIDO STREQUAL "bundled")
   # Protobuf library is a target, installed to <root>/${INSTALL_PRIV_LIBDIR}
   # INSTALL_RPATH must be set for all binaries linking with libprotobuf.
-  SET(UNIX_INSTALL_RPATH_ORIGIN_PRIV_LIBDIR 1)
-  ADD_SUBDIRECTORY(extra/protobuf)
+  IF(WITH_PROTOBUF STREQUAL "bundled")
+    SET(UNIX_INSTALL_RPATH_ORIGIN_PRIV_LIBDIR 1)
+    ADD_SUBDIRECTORY(extra/protobuf)
+  ENDIF()
+
+  # The Fido library is a target, installed to <root>/${INSTALL_PRIV_LIBDIR}
+  # INSTALL_RPATH must be set for all binaries linking with libfido2.
+  IF(WITH_FIDO STREQUAL "bundled")
+    SET(INSTALL_RPATH_FOR_FIDO2 1)
+
+    # Do not break the build here in case of missing libudev on Linux.
+    SET(UDEV_WARN_MISSING FALSE)
+    WARN_MISSING_SYSTEM_UDEV(UDEV_WARN_MISSING)
+    IF((WITH_AUTHENTICATION_FIDO OR WITH_AUTHENTICATION_CLIENT_PLUGINS)
+        AND NOT UDEV_WARN_MISSING)
+      # Silence warning about CMP0075
+      CMAKE_PUSH_CHECK_STATE()
+      SET(CMAKE_REQUIRED_LIBRARIES)
+      ADD_SUBDIRECTORY(${CMAKE_SOURCE_DIR}/${CBOR_BUNDLE_SRC_PATH})
+      ADD_SUBDIRECTORY(${CMAKE_SOURCE_DIR}/${FIDO_BUNDLE_SRC_PATH})
+      CMAKE_POP_CHECK_STATE()
+    ENDIF()
+  ENDIF()
+
   IF(NOT APPLE AND NOT WIN32)
     # Debug versions of plugins may be installed to <root>/lib/plugin/debug
     FOREACH(LINK_FLAG
@@ -1682,6 +1881,22 @@ ELSE()
   ENDIF()
 ENDIF()
 
+IF(WITH_ICU STREQUAL "bundled")
+  IF(IS_ABSOLUTE "${INSTALL_PRIV_LIBDIR}")
+    SET(MYSQL_ICU_DATADIR "${INSTALL_PRIV_LIBDIR}"
+      CACHE PATH "default MySQL ICU data directory")
+  ELSE()
+    SET(MYSQL_ICU_DATADIR "${DEFAULT_MYSQL_HOME}/${INSTALL_PRIV_LIBDIR}"
+      CACHE PATH "default MySQL ICU data directory")
+  ENDIF()
+
+  # Write an explicit symlink in CMAKE_BINARY_DIR, so we can find
+  # the ICU data directory when running in the build sandbox.
+  # See setting of mysql_home in calculate_mysql_home_from_my_progname().
+  FILE(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/extra/icu" ICU_DATA_SOURCE_DIR)
+  FILE(WRITE "${CMAKE_BINARY_DIR}/${ICUDT_DIR}.lnk" "${ICU_DATA_SOURCE_DIR}")
+ENDIF()
+
 # The hypergraph optimizer is default on only for debug builds.
 IF(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG" OR WITH_DEBUG)
   SET(WITH_HYPERGRAPH_OPTIMIZER_DEFAULT ON)
@@ -1693,6 +1908,15 @@ OPTION(WITH_HYPERGRAPH_OPTIMIZER
   ${WITH_HYPERGRAPH_OPTIMIZER_DEFAULT}
   )
 
+# Utility target to build every executable tagged with ADD_TEST.
+ADD_CUSTOM_TARGET(unittest_all)
+
+# Utility target to build every target added with MYSQL_ADD_PLUGIN.
+ADD_CUSTOM_TARGET(plugin_all)
+
+# Utility target to build every target added with MYSQL_ADD_COMPONENT.
+ADD_CUSTOM_TARGET(component_all)
+
 ADD_SUBDIRECTORY(include)
 ADD_SUBDIRECTORY(strings)
 ADD_SUBDIRECTORY(vio)
@@ -1700,20 +1924,9 @@ ADD_SUBDIRECTORY(mysys)
 ADD_SUBDIRECTORY(libmysql)
 ADD_SUBDIRECTORY(libbinlogevents)
 ADD_SUBDIRECTORY(libbinlogstandalone)
+ADD_SUBDIRECTORY(libchangestreams)
 
 IF(NOT WITHOUT_SERVER)
-  # Build failure on Solaris 11.3 for debug builds with NDBCLUSTER.
-  # Adding basic local optimizations unbreaks it.
-  # We *could* test 'uname -v' VERSION_LESS 11.4 here.
-  # A clean build takes roughly the same time with or without -xO1
-  # Link time of mysqld is roughly 10% faster with -xO1.
-  IF(SOLARIS_SPARC AND MY_COMPILER_IS_SUNPRO AND
-      CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
-    MESSAGE(STATUS
-      "Adding -xO1 for debug builds on Solaris ${MY_KERNEL_VERSION}")
-    STRING_APPEND(CMAKE_CXX_FLAGS_DEBUG " -xO1")
-  ENDIF()
-
   IF(WITH_UNIT_TESTS)
     IF(WIN32)
       SET(WITH_SHARED_UNITTEST_LIBRARY_DEFAULT OFF)
@@ -1870,12 +2083,13 @@ INCLUDE(${CMAKE_BINARY_DIR}/info_macros.cmake)
 # available, but should be repeated on each "make" just in case someone
 # does "cmake ; make ; git pull ; make".
 CREATE_INFO_SRC(${CMAKE_BINARY_DIR}/Docs)
-ADD_CUSTOM_TARGET(INFO_SRC ALL
+MY_ADD_CUSTOM_TARGET(INFO_SRC ALL
   COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/info_src.cmake
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
 # Build flags: This must be postponed to the make phase.
-ADD_CUSTOM_TARGET(INFO_BIN ALL
+MY_ADD_CUSTOM_TARGET(INFO_BIN ALL
   COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/info_bin.cmake
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -2008,6 +2222,14 @@ IF(UNIX)
      ./library_output_directory lib
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+  # See ./mysql-test/suite/innodb_fts/include/mecab.inc
+  IF(MECAB_IPADIC_PARENT)
+    EXECUTE_PROCESS(
+      COMMAND ${CMAKE_COMMAND} -E create_symlink
+      "${MECAB_IPADIC_PARENT}" mecab
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/library_output_directory
+      )
+  ENDIF()
 ENDIF()
 
 # Without any --plugin-dir=<directory name> the server will look in

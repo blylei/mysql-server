@@ -39,6 +39,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "sync0sync.h"
 #include "univ.i"
 #include "ut0counter.h"
+#include "ut0log.h"
 #include "ut0new.h"
 
 #ifdef UNIV_DEBUG
@@ -53,24 +54,6 @@ typedef CRITICAL_SECTION sys_mutex_t;
 /** Native mutex */
 typedef pthread_mutex_t sys_mutex_t;
 #endif /* _WIN32 */
-
-/** The new (C++11) syntax allows the following and we should use it when it
-is available on platforms that we support.
-
-        enum class mutex_state_t : lock_word_t { ... };
-*/
-
-/** Mutex states. */
-enum mutex_state_t {
-  /** Mutex is free */
-  MUTEX_STATE_UNLOCKED = 0,
-
-  /** Mutex is acquired by some thread. */
-  MUTEX_STATE_LOCKED = 1,
-
-  /** Mutex is contended and there are threads waiting on the lock. */
-  MUTEX_STATE_WAITERS = 2
-};
 
 /*
                 LATCHING ORDER WITHIN THE DATABASE
@@ -365,6 +348,7 @@ enum latch_id_t {
   LATCH_ID_BUF_POOL_FLUSH_STATE,
   LATCH_ID_DBLWR,
   LATCH_ID_DBLWR_SPACE_CACHE,
+  LATCH_ID_DDL_AUTOINC,
   LATCH_ID_CACHE_LAST_READ,
   LATCH_ID_DICT_FOREIGN_ERR,
   LATCH_ID_DICT_SYS,
@@ -587,9 +571,9 @@ Used for mutexes which have PFS keys defined under UNIV_PFS_MUTEX.
 @param[in]	id		Latch id
 @param[in]	level		Latch level
 @param[in]	key		PFS key */
-#define LATCH_ADD_MUTEX(id, level, key) \
-  latch_meta[LATCH_ID_##id] =           \
-      UT_NEW_NOKEY(latch_meta_t(LATCH_ID_##id, #id, level, #level, key))
+#define LATCH_ADD_MUTEX(id, level, key)                      \
+  latch_meta[LATCH_ID_##id] = ut::new_withkey<latch_meta_t>( \
+      UT_NEW_THIS_FILE_PSI_KEY, LATCH_ID_##id, #id, level, #level, key)
 
 #ifdef UNIV_PFS_RWLOCK
 /** Latch element.
@@ -597,22 +581,23 @@ Used for rwlocks which have PFS keys defined under UNIV_PFS_RWLOCK.
 @param[in]	id		Latch id
 @param[in]	level		Latch level
 @param[in]	key		PFS key */
-#define LATCH_ADD_RWLOCK(id, level, key) \
-  latch_meta[LATCH_ID_##id] =            \
-      UT_NEW_NOKEY(latch_meta_t(LATCH_ID_##id, #id, level, #level, key))
+#define LATCH_ADD_RWLOCK(id, level, key)                     \
+  latch_meta[LATCH_ID_##id] = ut::new_withkey<latch_meta_t>( \
+      UT_NEW_THIS_FILE_PSI_KEY, LATCH_ID_##id, #id, level, #level, key)
 #else
-#define LATCH_ADD_RWLOCK(id, level, key)    \
-  latch_meta[LATCH_ID_##id] = UT_NEW_NOKEY( \
-      latch_meta_t(LATCH_ID_##id, #id, level, #level, PSI_NOT_INSTRUMENTED))
+#define LATCH_ADD_RWLOCK(id, level, key)                                     \
+  latch_meta[LATCH_ID_##id] =                                                \
+      ut::new_withkey<latch_meta_t>(UT_NEW_THIS_FILE_PSI_KEY, LATCH_ID_##id, \
+                                    #id, level, #level, PSI_NOT_INSTRUMENTED)
 #endif /* UNIV_PFS_RWLOCK */
 
 #else
-#define LATCH_ADD_MUTEX(id, level, key) \
-  latch_meta[LATCH_ID_##id] =           \
-      UT_NEW_NOKEY(latch_meta_t(LATCH_ID_##id, #id, level, #level))
-#define LATCH_ADD_RWLOCK(id, level, key) \
-  latch_meta[LATCH_ID_##id] =            \
-      UT_NEW_NOKEY(latch_meta_t(LATCH_ID_##id, #id, level, #level))
+#define LATCH_ADD_MUTEX(id, level, key)                      \
+  latch_meta[LATCH_ID_##id] = ut::new_withkey<latch_meta_t>( \
+      UT_NEW_THIS_FILE_PSI_KEY, LATCH_ID_##id, #id, level, #level)
+#define LATCH_ADD_RWLOCK(id, level, key)                     \
+  latch_meta[LATCH_ID_##id] = ut::new_withkey<latch_meta_t>( \
+      UT_NEW_THIS_FILE_PSI_KEY, LATCH_ID_##id, #id, level, #level)
 #endif /* UNIV_PFS_MUTEX */
 
 /** Default latch counter */
@@ -653,7 +638,7 @@ class LatchCounter {
     m_mutex.destroy();
 
     for (Count *count : m_counters) {
-      UT_DELETE(count);
+      ut::delete_(count);
     }
   }
 
@@ -678,7 +663,7 @@ class LatchCounter {
     Count *count;
 
     if (m_counters.empty()) {
-      count = UT_NEW_NOKEY(Count());
+      count = ut::new_withkey<Count>(UT_NEW_THIS_FILE_PSI_KEY);
       m_counters.push_back(count);
     } else {
       ut_a(m_counters.size() == 1);
@@ -874,7 +859,8 @@ class LatchMeta {
 };
 
 typedef LatchMeta<LatchCounter> latch_meta_t;
-typedef std::vector<latch_meta_t *, ut_allocator<latch_meta_t *>> LatchMetaData;
+typedef std::vector<latch_meta_t *, ut::allocator<latch_meta_t *>>
+    LatchMetaData;
 
 /** Note: This is accessed without any mutex protection. It is initialised
 at startup and elements should not be added to or removed from it after
@@ -1170,6 +1156,9 @@ struct sync_allowed_latches : public sync_check_functor_t {
   sync_allowed_latches(const latch_level_t *from, const latch_level_t *to)
       : m_result(), m_latches(from, to) {}
 
+  /** Default constructor.  The list of allowed latches is empty. */
+  sync_allowed_latches() : m_result(), m_latches() {}
+
   /** Check whether the given latch_t violates the latch constraint.
   This object maintains a list of allowed latch levels, and if the given
   latch belongs to a latch level that is not there in the allowed list,
@@ -1205,7 +1194,7 @@ struct sync_allowed_latches : public sync_check_functor_t {
   True if all OK */
   bool m_result;
 
-  typedef std::vector<latch_level_t, ut_allocator<latch_level_t>> latches_t;
+  typedef std::vector<latch_level_t, ut::allocator<latch_level_t>> latches_t;
 
   /** List of latch levels that are allowed to be held */
   latches_t m_latches;

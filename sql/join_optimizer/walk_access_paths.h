@@ -23,7 +23,10 @@
 #ifndef SQL_JOIN_OPTIMIZER_WALK_ACCESS_PATHS_H
 #define SQL_JOIN_OPTIMIZER_WALK_ACCESS_PATHS_H
 
+#include <type_traits>
+
 #include "sql/join_optimizer/access_path.h"
+#include "sql/range_optimizer/range_optimizer.h"
 
 enum class WalkAccessPathPolicy {
   // Stop on _any_ MATERIALIZE or STREAM path, even if they do not cross query
@@ -49,15 +52,17 @@ enum class WalkAccessPathPolicy {
   will give the correct value to the func() callback. It is only used by
   WalkAccesspath() itself if the policy is ENTIRE_QUERY_BLOCK; if not, it is
   only used for the func() callback, and you can set it to nullptr if you wish.
-  func() must have signature func(AccessPath *, const JOIN *).
-
-  Nothing currently uses post-order traversal, but it has been requested for
-  future use.
+  func() must have signature func(AccessPath *, const JOIN *), or it could be
+  JOIN * if a non-const JOIN is given in.
  */
-template <class Func>
-void WalkAccessPaths(AccessPath *path, const JOIN *join,
+template <class Func, class JoinPtr>
+void WalkAccessPaths(AccessPath *path, JoinPtr join,
                      WalkAccessPathPolicy cross_query_blocks, Func &&func,
                      bool post_order_traversal = false) {
+  static_assert(
+      std::is_convertible<JoinPtr, const JOIN *>::value,
+      "The “join” argument must be JOIN * or const JOIN * (or nullptr).");
+
   if (cross_query_blocks == WalkAccessPathPolicy::ENTIRE_QUERY_BLOCK) {
     assert(join != nullptr);
   }
@@ -79,6 +84,8 @@ void WalkAccessPaths(AccessPath *path, const JOIN *join,
     case AccessPath::MRR:
     case AccessPath::FOLLOW_TAIL:
     case AccessPath::INDEX_RANGE_SCAN:
+    case AccessPath::INDEX_SKIP_SCAN:
+    case AccessPath::GROUP_INDEX_SKIP_SCAN:
     case AccessPath::DYNAMIC_INDEX_RANGE_SCAN:
     case AccessPath::TABLE_VALUE_CONSTRUCTOR:
     case AccessPath::FAKE_SINGLE_ROW:
@@ -87,7 +94,7 @@ void WalkAccessPaths(AccessPath *path, const JOIN *join,
     case AccessPath::MATERIALIZED_TABLE_FUNCTION:
     case AccessPath::UNQUALIFIED_COUNT:
       // No children.
-      return;
+      break;
     case AccessPath::NESTED_LOOP_JOIN:
       WalkAccessPaths(path->nested_loop_join().outer, join, cross_query_blocks,
                       std::forward<Func &&>(func), post_order_traversal);
@@ -199,6 +206,28 @@ void WalkAccessPaths(AccessPath *path, const JOIN *join,
       WalkAccessPaths(path->cache_invalidator().child, join, cross_query_blocks,
                       std::forward<Func &&>(func), post_order_traversal);
       break;
+    case AccessPath::INDEX_MERGE:
+      for (AccessPath *child : *path->index_merge().children) {
+        WalkAccessPaths(child, join, cross_query_blocks,
+                        std::forward<Func &&>(func), post_order_traversal);
+      }
+      break;
+    case AccessPath::ROWID_INTERSECTION:
+      for (AccessPath *child : *path->rowid_intersection().children) {
+        WalkAccessPaths(child, join, cross_query_blocks,
+                        std::forward<Func &&>(func), post_order_traversal);
+      }
+      break;
+    case AccessPath::ROWID_UNION:
+      for (AccessPath *child : *path->rowid_union().children) {
+        WalkAccessPaths(child, join, cross_query_blocks,
+                        std::forward<Func &&>(func), post_order_traversal);
+      }
+      break;
+    case AccessPath::DELETE_ROWS:
+      WalkAccessPaths(path->delete_rows().child, join, cross_query_blocks,
+                      std::forward<Func &&>(func), post_order_traversal);
+      break;
   }
   if (post_order_traversal) {
     if (func(path, join)) {
@@ -216,7 +245,8 @@ void WalkAccessPaths(AccessPath *path, const JOIN *join,
   func() must have signature func(TABLE *), and return true upon error.
  */
 template <class Func>
-void WalkTablesUnderAccessPath(AccessPath *root_path, Func &&func) {
+void WalkTablesUnderAccessPath(AccessPath *root_path, Func &&func,
+                               bool include_pruned_tables) {
   WalkAccessPaths(
       root_path, /*join=*/nullptr,
       WalkAccessPathPolicy::STOP_AT_MATERIALIZATION,
@@ -243,7 +273,11 @@ void WalkTablesUnderAccessPath(AccessPath *root_path, Func &&func) {
           case AccessPath::FOLLOW_TAIL:
             return func(path->follow_tail().table);
           case AccessPath::INDEX_RANGE_SCAN:
-            return func(path->index_range_scan().table);
+            return func(path->index_range_scan().used_key_part[0].field->table);
+          case AccessPath::INDEX_SKIP_SCAN:
+            return func(path->index_skip_scan().table);
+          case AccessPath::GROUP_INDEX_SKIP_SCAN:
+            return func(path->group_index_skip_scan().table);
           case AccessPath::DYNAMIC_INDEX_RANGE_SCAN:
             return func(path->dynamic_index_range_scan().table);
           case AccessPath::STREAM:
@@ -260,6 +294,14 @@ void WalkTablesUnderAccessPath(AccessPath *root_path, Func &&func) {
             // WalkTablesUnderAccessPath().
             assert(false);
             return true;
+          case AccessPath::ZERO_ROWS:
+            if (include_pruned_tables) {
+              WalkTablesUnderAccessPath(path->zero_rows().child, func,
+                                        include_pruned_tables);
+            }
+            return false;
+          case AccessPath::WINDOW:
+            return func(path->window().temp_table);
           case AccessPath::AGGREGATE:
           case AccessPath::APPEND:
           case AccessPath::BKA_JOIN:
@@ -277,9 +319,11 @@ void WalkTablesUnderAccessPath(AccessPath *root_path, Func &&func) {
           case AccessPath::TABLE_VALUE_CONSTRUCTOR:
           case AccessPath::TEMPTABLE_AGGREGATE:
           case AccessPath::WEEDOUT:
-          case AccessPath::WINDOW:
-          case AccessPath::ZERO_ROWS:
           case AccessPath::ZERO_ROWS_AGGREGATED:
+          case AccessPath::INDEX_MERGE:
+          case AccessPath::ROWID_INTERSECTION:
+          case AccessPath::ROWID_UNION:
+          case AccessPath::DELETE_ROWS:
             return false;
         }
         assert(false);

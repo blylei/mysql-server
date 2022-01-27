@@ -755,7 +755,7 @@ static ulonglong start_position, stop_position;
 #define stop_position_mot ((my_off_t)stop_position)
 
 static char *start_datetime_str, *stop_datetime_str;
-static my_time_t start_datetime = 0, stop_datetime = MY_TIME_T_MAX;
+static my_time_t start_datetime = 0, stop_datetime = MYTIME_MAX_VALUE;
 static ulonglong rec_count = 0;
 static MYSQL *mysql = nullptr;
 static char *dirname_for_local_load = nullptr;
@@ -1601,7 +1601,7 @@ static Exit_status process_event(PRINT_EVENT_INFO *print_event_info,
           goto end;
         }
       }
-      // Fall through
+        [[fallthrough]];
       case binary_log::ROWS_QUERY_LOG_EVENT:
       case binary_log::WRITE_ROWS_EVENT:
       case binary_log::DELETE_ROWS_EVENT:
@@ -1754,7 +1754,7 @@ static Exit_status process_event(PRINT_EVENT_INFO *print_event_info,
               "any case. If you want to exclude or include transactions, "
               "you should use the options --exclude-gtids or "
               "--include-gtids, respectively, instead.");
-        /* fall through */
+        [[fallthrough]];
       default:
         ev->print(result_file, print_event_info);
         if (head->error == -1) goto err;
@@ -2162,7 +2162,7 @@ the mysql command line client.\n\n");
 static my_time_t convert_str_to_timestamp(const char *str) {
   MYSQL_TIME_STATUS status;
   MYSQL_TIME l_time;
-  long dummy_my_timezone;
+  my_time_t dummy_my_timezone;
   bool dummy_in_dst_time_gap;
   /* We require a total specification (date AND time) */
   if (str_to_datetime(str, strlen(str), &l_time, 0, &status) ||
@@ -2241,7 +2241,7 @@ extern "C" bool get_one_option(int optid, const struct my_option *opt,
     case OPT_READ_FROM_REMOTE_MASTER_DEPRECATED:
       warning(CLIENT_WARN_DEPRECATED_MSG("--read-from-remote-master",
                                          "--read-from-remote-source"));
-      /* FALLTHROUGH */
+      [[fallthrough]];
     case OPT_REMOTE_PROTO:
       opt_remote_proto = (enum_remote_proto)(
           find_type_or_exit(argument, &remote_proto_typelib, opt->name) - 1);
@@ -3134,7 +3134,7 @@ static int args_post_process(void) {
     if (stop_position != (ulonglong)(~(my_off_t)0))
       warning("The --stop-position option is ignored in raw mode");
 
-    if (stop_datetime != MY_TIME_T_MAX)
+    if (stop_datetime != MYTIME_MAX_VALUE)
       warning("The --stop-datetime option is ignored in raw mode");
   } else if (output_file) {
     if (!(result_file =

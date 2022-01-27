@@ -31,8 +31,6 @@
 #include <string>
 
 #ifdef RAPIDJSON_NO_SIZETYPEDEFINE
-// if we build within the server, it will set RAPIDJSON_NO_SIZETYPEDEFINE
-// globally and require to include my_rapidjson_size_t.h
 #include "my_rapidjson_size_t.h"
 #endif
 
@@ -44,8 +42,7 @@
 #include "mysql/harness/config_parser.h"
 #include "mysql/harness/logging/logging.h"
 #include "mysql/harness/plugin.h"
-
-#include "mysqlrouter/plugin_config.h"
+#include "mysql/harness/plugin_config.h"
 
 #include "common.h"  // ScopeGuard
 #include "mysqlrouter/http_server_component.h"

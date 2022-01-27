@@ -27,9 +27,6 @@ SET(MYSQLX_PROJECT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 SET(MYSQLX_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 SET(MYSQLX_PLUGIN_NAME "mysqlx")
 
-# Protobuf 3 will generate #if PROTOBUF_INLINE_NOT_IN_HEADERS
-# which may fail with -Werror=undef
-ADD_DEFINITIONS(-DPROTOBUF_INLINE_NOT_IN_HEADERS=0)
 IF(WIN32)
   # Activate necessary dllexport/dllimport declarations.
   ADD_DEFINITIONS(-DPROTOBUF_USE_DLLS)
@@ -89,13 +86,6 @@ ADD_COMPILE_FLAGS(${XPLUGIN_SRC}
   COMPILE_FLAGS "${MYSQLX_PROTOCOL_FLAGS}"
 )
 
-# assertion failed in function assert_with_dumps() @ ssa.c:621 when using -xO3
-IF(MY_COMPILER_IS_SUNPRO)
-  ADD_COMPILE_FLAGS(${MYSQLX_PROJECT_DIR}/src/client.cc
-    COMPILE_FLAGS "-xO2"
-  )
-ENDIF()
-
 # MYSQL_ADD_PLUGIN may have disabled the plugin.
 IF(WITH_MYSQLX)
   MYSQL_ADD_PLUGIN(${MYSQLX_PLUGIN_NAME}
@@ -126,9 +116,3 @@ IF(DISABLE_MYSQLX_PROTOBUF_LITE)
   MESSAGE(STATUS "MYSQLX - Using protobuf instead protobuf-lite")
   ADD_DEFINITIONS(-DUSE_MYSQLX_FULL_PROTO)
 ENDIF()
-
-# ICU headers for WIN32 need extra info about their libs state
-IF(WIN32)
-  ADD_DEFINITIONS(-DU_STATIC_IMPLEMENTATION)
-ENDIF()
-

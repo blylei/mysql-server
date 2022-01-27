@@ -82,7 +82,7 @@ def					Extra	253	1020	37	N	1	31	255
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	range	PRIMARY	PRIMARY	4	NULL	3	100.00	Using index condition; Using filesort
 Warnings:
-Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a` from `test`.`t1` where (`test`.`t1`.`a` > <cache>(1)) order by `test`.`t1`.`b`
+Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a` from `test`.`t1` where (`test`.`t1`.`a` > 1) order by `test`.`t1`.`b`
 DROP TABLE t1, t9;
 drop table if exists t1, t9 ;
 create table t1
@@ -979,8 +979,6 @@ prepare stmt1 from 'select c4 FROM t9 where
     c13 = (select MAX(b) from t1 where a = ?) and c22 = ? ' ;
 execute stmt1 using @arg01, @arg02;
 c4
-Warnings:
-Warning	1292	Truncated incorrect DOUBLE value: 'two'
 prepare stmt1 from ' select a, b FROM t1 outer_table where
    a = (select a from t1 where b = outer_table.b ) order by a ';
 execute stmt1 ;
@@ -3197,7 +3195,6 @@ Note	1265	Data truncated for column 'c16' at row 1
 Warning	1265	Data truncated for column 'c17' at row 1
 Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
-Note	1265	Data truncated for column 'c16' at row 1
 Warning	1265	Data truncated for column 'c17' at row 1
 Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
@@ -3209,7 +3206,6 @@ Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
 Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
-Note	1265	Data truncated for column 'c16' at row 1
 Warning	1265	Data truncated for column 'c17' at row 1
 Warnings:
 Warning	1265	Data truncated for column 'c13' at row 1
@@ -3248,7 +3244,7 @@ Warning	1265	Data truncated for column 'c15' at row 1
 Warning	1264	Out of range value for column 'c16' at row 1
 Warning	1264	Out of range value for column 'c17' at row 1
 Warnings:
-Warning	1265	Data truncated for column 'c15' at row 1
+Warning	1264	Out of range value for column 'c15' at row 1
 Warning	1264	Out of range value for column 'c16' at row 1
 Warning	1264	Out of range value for column 'c17' at row 1
 select c1, c13, c14, c15, c16, c17 from t9 order by c1 ;
@@ -5285,7 +5281,6 @@ Note	1265	Data truncated for column 'c16' at row 1
 Warning	1265	Data truncated for column 'c17' at row 1
 Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
-Note	1265	Data truncated for column 'c16' at row 1
 Warning	1265	Data truncated for column 'c17' at row 1
 Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
@@ -5297,7 +5292,6 @@ Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
 Warnings:
 Note	1265	Data truncated for column 'c13' at row 1
-Note	1265	Data truncated for column 'c16' at row 1
 Warning	1265	Data truncated for column 'c17' at row 1
 Warnings:
 Warning	1265	Data truncated for column 'c13' at row 1
@@ -5336,7 +5330,7 @@ Warning	1265	Data truncated for column 'c15' at row 1
 Warning	1264	Out of range value for column 'c16' at row 1
 Warning	1264	Out of range value for column 'c17' at row 1
 Warnings:
-Warning	1265	Data truncated for column 'c15' at row 1
+Warning	1264	Out of range value for column 'c15' at row 1
 Warning	1264	Out of range value for column 'c16' at row 1
 Warning	1264	Out of range value for column 'c17' at row 1
 select c1, c13, c14, c15, c16, c17 from t9 order by c1 ;

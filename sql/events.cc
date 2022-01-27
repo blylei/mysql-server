@@ -563,6 +563,13 @@ bool Events::update_event(THD *thd, Event_parse_data *parse_data,
       trans_commit_stmt(thd) || trans_commit(thd))
     goto err_with_rollback;
 
+  if (new_dbname != nullptr) {
+    /* RENAME: Drop the old event instrumentation. */
+    MYSQL_DROP_SP(to_uint(enum_sp_type::EVENT), parse_data->dbname.str,
+                  parse_data->dbname.length, parse_data->name.str,
+                  parse_data->name.length);
+  }
+
   // Update element in event queue.
   if (event_queue && new_element != nullptr) {
     /*
@@ -1016,9 +1023,10 @@ static PSI_cond_info all_events_conds[] = {
 PSI_thread_key key_thread_event_scheduler, key_thread_event_worker;
 
 static PSI_thread_info all_events_threads[] = {
-    {&key_thread_event_scheduler, "event_scheduler", PSI_FLAG_SINGLETON, 0,
-     PSI_DOCUMENT_ME},
-    {&key_thread_event_worker, "event_worker", 0, 0, PSI_DOCUMENT_ME}};
+    {&key_thread_event_scheduler, "event_scheduler", "evt_sched",
+     PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
+    {&key_thread_event_worker, "event_worker", "evt_wkr", 0, 0,
+     PSI_DOCUMENT_ME}};
 #endif /* HAVE_PSI_INTERFACE */
 
 PSI_stage_info stage_waiting_on_empty_queue = {0, "Waiting on empty queue", 0,

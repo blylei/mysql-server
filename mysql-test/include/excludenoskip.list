@@ -4,9 +4,11 @@
 #         - Below listed inc files will continue to skip with --no-skip option#
 #                                                                             #
 # Creation Date: 2016-July-26                                                 #
-# Author : Mohit Joshi							      #
-#									      #
-#									      #
+# Author : Mohit Joshi                                                        #
+#                                                                             #
+# Make sure to not add trailing blanks or bad things can happen when using    #
+# this list on the command line of mysqltest: following entries will become   #
+# a new argument instead of being part of the value of --no-skip-exclude-list #
 ###############################################################################
 
 # 1.0 OS dependent files
@@ -45,6 +47,10 @@ costmodel_planchange.test
 have_met_timezone.inc
 # Checks if server is started with Moscow leap timezone. Including the below inc file until Bug#25188986 is fixed.
 have_moscow_leap_timezone.inc
+
+# 32/64 bits time_t
+have_32bits_time.inc
+have_64bits_time.inc
 
 # 2.0 Binlog formats
 # Below files are included because rpl suite runs each test with 3 different
@@ -205,11 +211,19 @@ only_mts_replica_parallel_workers.inc
 only_mts_replica_parallel_type_logical_clock.inc
 only_mts_replica_parallel_type_database.inc
 not_mts_replica_parallel_workers.inc
+only_replica_preserve_commit_order.inc
 # 14.2 rpl misc files
 have_slave_repository_type_table.inc
 not_relay_log_info_file.inc
 not_master_info_file.inc
 have_transaction_write_set_extraction.inc
+
+#14.3 Some replication tests cannot run with GTID_ONLY == 1
+not_rpl_gtid_only.inc
+
+# 14.4 Generic RPL include file to skip a test if a variable is not
+# set to a specific value
+only_with_option.inc
 
 # 16.0 Thread stack overrun on debug/sparc when built with Developer Studio
 not_sparc_debug.inc
@@ -286,9 +300,14 @@ no_checkpoint_cleanup.inc
 # disables wildcard grants at database level.
 not_partial_revokes.inc
 
-# 29. This file is used for skipping tests which cannot be run successfully
-# with the hypergraph optimizer yet.
+# 29. These files are used for skipping tests which cannot be run successfully
+# with the hypergraph optimizer yet, or need the hypergraph optimizer to run.
+have_hypergraph.inc
 not_hypergraph.inc
 
 # 30. Keyring_file component - can be skipped based on cmake configuration
 have_component_keyring_file.inc
+
+# 31. MTR test case can be skipped because it is just used to exercise
+# a unit test that requires a runninng server.
+have_cs_test_mysql_proto_reader_mtr.inc
