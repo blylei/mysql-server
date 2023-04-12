@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -63,6 +63,8 @@ private:
   Uint32 partitionCount;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_CREATE_FRAGMENTATION_REQ, Local);
+
 class CreateFragmentationRef {
   /**
    * Sender(s)
@@ -92,6 +94,8 @@ private:
   Uint32 errorCode;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_CREATE_FRAGMENTATION_REF, Local);
+
 class CreateFragmentationConf {
   /**
    * Sender(s)
@@ -116,6 +120,7 @@ private:
   Uint32 noOfFragments;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_CREATE_FRAGMENTATION_CONF, Local);
 
 #undef JAM_FILE_ID
 

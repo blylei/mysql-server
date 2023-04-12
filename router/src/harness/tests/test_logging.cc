@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -36,7 +36,6 @@
 
 ////////////////////////////////////////
 // Internal interfaces
-#include "common.h"
 #include "dim.h"
 #include "include/magic.h"
 #include "mysql/harness/filesystem.h"
@@ -232,7 +231,7 @@ TEST_F(LoggingLowLevelTest, test_logger_update) {
     EXPECT_EQ(3u, g_registry->get_logger("foo").get_handler_names().size());
   }
 
-  // detaching non-existant handlers is optionally verified by detach_handler().
+  // detaching non-existent handlers is optionally verified by detach_handler().
   // It is not something that concerns update_logger(), since it only sees
   // the Logger object after all the handlers that were supposed to be detached,
   // got detached
@@ -297,7 +296,7 @@ TEST(FunctionalTest, LogFromUnregisteredModule) {
 TEST(FunctionalTest, LogOnDanglingHandlerReference) {
   // NOTE: "a_gonner" and "z_stayer" are named like that to ensure that
   // iterating over the container (std::set<std::string>) inside
-  // Logger::handler() will process "a_gonner" first. std::set makes guarrantee
+  // Logger::handler() will process "a_gonner" first. std::set makes guarantee
   // that iterating over its elements will be in ascending element order, which
   // means alphabetical order in case of std::string. By having those two named
   // like that, we additionally verify that logging to a valid handler will
@@ -320,7 +319,7 @@ TEST(FunctionalTest, LogOnDanglingHandlerReference) {
   // now remove first handler
   g_registry->remove_handler("a_gonner");
 
-  // and try to log with the logger still holding a referece to it.
+  // and try to log with the logger still holding a reference to it.
   // Logger::handle() should deal with it properly - it should log
   // to all (still existing) handlers ("z_stayer" in this case).
   EXPECT_NO_THROW(
@@ -526,7 +525,7 @@ TEST_F(LoggingTest, DontThrowIfOpenedLogFileForWriting) {
  *       create file in directory.
  *
  * There is component test: RouterLoggingTest, bad_logging_folder
- * that uses file as a directory to veryfy scenario when file cannot
+ * that uses file as a directory to verify scenario when file cannot
  * be created in directory.
  */
 TEST_F(LoggingTest, FileHandlerThrowsNoPermissionToCreateFileInDirectory) {

@@ -1,4 +1,4 @@
-# Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -27,6 +27,8 @@ SET(helper_sources
   helpers/gtest_testname.cc
   helpers/mock_server_testutils.cc
   helpers/mysql_session_replayer.cc
+  helpers/core_dumper.cc
+  helpers/core_finder.cc
   helpers/process_manager.cc
   helpers/process_wrapper.cc
   helpers/router_component_clusterset.cc
@@ -61,6 +63,7 @@ TARGET_INCLUDE_DIRECTORIES(routertest_helpers
 
 ADD_SUBDIRECTORY(component)
 ADD_SUBDIRECTORY(fuzzers)
+ADD_SUBDIRECTORY(integration)
 
 ADD_DEFINITIONS(
   -DCOMPONENT_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/component/data/")

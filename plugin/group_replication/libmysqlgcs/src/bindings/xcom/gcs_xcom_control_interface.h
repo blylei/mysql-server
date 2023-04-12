@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -788,7 +788,7 @@ class Gcs_xcom_control : public Gcs_control_interface {
  protected:
   /*
     Whether the XCOM was left running or not meaning that the join
-    operation was successfuly executed. Note, however, that this
+    operation was successfully executed. Note, however, that this
     does not mean that any view was delivered yet.
 
     This flag is only updated by the MySQL GCS engine when the join

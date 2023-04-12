@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -213,8 +213,6 @@ UniqueId::UniqueId(UniqueId &&other) {
 }
 
 uint16_t TcpPortPool::get_next_available() {
-  net::io_context io_ctx;
-
   while (true) {
     if (number_of_ids_used_ % kPortsPerFile == 0) {
       number_of_ids_used_ = 0;
@@ -231,6 +229,6 @@ uint16_t TcpPortPool::get_next_available() {
     unsigned result = 10000 + unique_ids_.back().get() * kPortsPerFile +
                       number_of_ids_used_++;
 
-    if (is_port_available(result)) return result;
+    if (is_port_bindable(result)) return result;
   }
 }

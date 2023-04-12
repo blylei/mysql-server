@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -52,7 +52,7 @@ struct TABLE;
  */
 class Ndb_table_map {
  public:
-  Ndb_table_map(const TABLE *, const NdbDictionary::Table *ndb_table = 0);
+  Ndb_table_map(const TABLE *, const NdbDictionary::Table *ndb_table = nullptr);
   ~Ndb_table_map();
 
   /* Get the NDB column number for a MySQL field.
@@ -102,7 +102,7 @@ class Ndb_table_map {
   unsigned char *get_column_mask(const MY_BITMAP *mysql_field_map);
 
   /*
-   Adapter function for checking wheter a TABLE*
+   Adapter function for checking whether a TABLE*
    has virtual generated columns.
    Function existed in 5.7 as table->has_virtual_gcol()
   */

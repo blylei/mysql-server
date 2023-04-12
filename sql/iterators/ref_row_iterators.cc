@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -69,13 +69,12 @@
 #include "template_utils.h"
 
 using std::make_pair;
-using std::move;
 using std::pair;
 
 static inline pair<uchar *, key_part_map> FindKeyBufferAndMap(
-    const TABLE_REF *ref);
+    const Index_lookup *ref);
 
-ConstIterator::ConstIterator(THD *thd, TABLE *table, TABLE_REF *table_ref,
+ConstIterator::ConstIterator(THD *thd, TABLE *table, Index_lookup *table_ref,
                              ha_rows *examined_rows)
     : TableRowIterator(thd, table),
       m_ref(table_ref),
@@ -108,11 +107,10 @@ int ConstIterator::Read() {
   return err;
 }
 
-EQRefIterator::EQRefIterator(THD *thd, TABLE *table, TABLE_REF *ref,
-                             bool use_order, ha_rows *examined_rows)
+EQRefIterator::EQRefIterator(THD *thd, TABLE *table, Index_lookup *ref,
+                             ha_rows *examined_rows)
     : TableRowIterator(thd, table),
       m_ref(ref),
-      m_use_order(use_order),
       m_examined_rows(examined_rows) {}
 
 /**
@@ -134,8 +132,7 @@ EQRefIterator::EQRefIterator(THD *thd, TABLE *table, TABLE_REF *ref,
 
 bool EQRefIterator::Init() {
   if (!table()->file->inited) {
-    assert(!m_use_order);  // Don't expect sort req. for single row.
-    int error = table()->file->ha_index_init(m_ref->key, m_use_order);
+    int error = table()->file->ha_index_init(m_ref->key, /*sorted=*/false);
     if (error) {
       PrintError(error);
       return true;
@@ -183,7 +180,7 @@ int EQRefIterator::Read() {
     memcpy(m_ref->key_buff2, m_ref->key_buff, m_ref->key_length);
 
   // Create new key for lookup
-  m_ref->key_err = construct_lookup_ref(thd(), table(), m_ref);
+  m_ref->key_err = construct_lookup(thd(), table(), m_ref);
   if (m_ref->key_err) {
     table()->set_no_row();
     return -1;
@@ -206,7 +203,7 @@ int EQRefIterator::Read() {
       Perform "Late NULLs Filtering" (see internals manual for explanations)
 
       As EQRefIterator effectively implements a one row cache of last
-      fetched row, the NULLs filtering cant be done until after the cache
+      fetched row, the NULLs filtering can't be done until after the cache
       key has been checked and updated, and row locks maintained.
     */
     if (m_ref->impossible_null_ref()) {
@@ -242,7 +239,7 @@ int EQRefIterator::Read() {
   it if it was not used in this invocation of EQRefIterator::Read().
   Only count locks, thus remembering if the record was left unused,
   and unlock already when pruning the current value of
-  TABLE_REF buffer.
+  Index_lookup buffer.
   @sa EQRefIterator::Read()
 */
 
@@ -252,7 +249,7 @@ void EQRefIterator::UnlockRow() {
 }
 
 PushedJoinRefIterator::PushedJoinRefIterator(THD *thd, TABLE *table,
-                                             TABLE_REF *ref, bool use_order,
+                                             Index_lookup *ref, bool use_order,
                                              bool is_unique,
                                              ha_rows *examined_rows)
     : TableRowIterator(thd, table),
@@ -287,7 +284,7 @@ int PushedJoinRefIterator::Read() {
       return -1;
     }
 
-    if (construct_lookup_ref(thd(), table(), m_ref)) {
+    if (construct_lookup(thd(), table(), m_ref)) {
       table()->set_no_row();
       return -1;
     }
@@ -340,9 +337,16 @@ static bool init_index(TABLE *table, handler *file, uint idx, bool sorted) {
 template <bool Reverse>
 bool RefIterator<Reverse>::Init() {
   m_first_record_since_init = true;
+  m_is_mvi_unique_filter_enabled = false;
   if (table()->file->inited) return false;
   if (init_index(table(), table()->file, m_ref->key, m_use_order)) {
     return true;
+  }
+  // Enable & reset unique record filter for multi-valued index
+  if (table()->key_info[m_ref->key].flags & HA_MULTI_VALUED_KEY) {
+    table()->file->ha_extra(HA_EXTRA_ENABLE_UNIQUE_RECORD_FILTER);
+    table()->prepare_for_position();
+    m_is_mvi_unique_filter_enabled = true;
   }
   return set_record_buffer(table(), m_expected_rows);
 }
@@ -368,7 +372,7 @@ int RefIterator<false>::Read() {  // Forward read.
       table()->set_no_row();
       return -1;
     }
-    if (construct_lookup_ref(thd(), table(), m_ref)) {
+    if (construct_lookup(thd(), table(), m_ref)) {
       table()->set_no_row();
       return -1;
     }
@@ -381,8 +385,12 @@ int RefIterator<false>::Read() {  // Forward read.
       return HandleError(error);
     }
   } else {
-    int error = table()->file->ha_index_next_same(
-        table()->record[0], m_ref->key_buff, m_ref->key_length);
+    int error = 0;
+    // Fetch unique rows matching the Ref Key in case of multi-value index
+    do {
+      error = table()->file->ha_index_next_same(
+          table()->record[0], m_ref->key_buff, m_ref->key_length);
+    } while (error == HA_ERR_KEY_NOT_FOUND && m_is_mvi_unique_filter_enabled);
     if (error) {
       return HandleError(error);
     }
@@ -417,7 +425,7 @@ int RefIterator<true>::Read() {  // Reverse read.
       table()->set_no_row();
       return -1;
     }
-    if (construct_lookup_ref(thd(), table(), m_ref)) {
+    if (construct_lookup(thd(), table(), m_ref)) {
       table()->set_no_row();
       return -1;
     }
@@ -451,6 +459,14 @@ int RefIterator<true>::Read() {  // Reverse read.
     ++*m_examined_rows;
   }
   return 0;
+}
+
+template <bool Reverse>
+RefIterator<Reverse>::~RefIterator() {
+  if (table()->key_info[m_ref->key].flags & HA_MULTI_VALUED_KEY &&
+      table()->file) {
+    table()->file->ha_extra(HA_EXTRA_DISABLE_UNIQUE_RECORD_FILTER);
+  }
 }
 
 template class RefIterator<true>;
@@ -567,7 +583,7 @@ bool DynamicRangeIterator::Init() {
   // two different read sets, to be used once the access strategy is chosen
   // here.
   if (qck) {
-    m_iterator = move(qck);
+    m_iterator = std::move(qck);
     // If the range optimizer chose index merge scan or a range scan with
     // covering index, use the read set without base columns. Otherwise we use
     // the read set with base columns included.
@@ -595,7 +611,7 @@ int DynamicRangeIterator::Read() {
 }
 
 FullTextSearchIterator::FullTextSearchIterator(THD *thd, TABLE *table,
-                                               TABLE_REF *ref,
+                                               Index_lookup *ref,
                                                Item_func_match *ft_func,
                                                bool use_order, bool use_limit,
                                                ha_rows *examined_rows)
@@ -687,7 +703,7 @@ int FullTextSearchIterator::Read() {
   Reading of key with key reference and one part that may be NULL.
 */
 
-RefOrNullIterator::RefOrNullIterator(THD *thd, TABLE *table, TABLE_REF *ref,
+RefOrNullIterator::RefOrNullIterator(THD *thd, TABLE *table, Index_lookup *ref,
                                      bool use_order, double expected_rows,
                                      ha_rows *examined_rows)
     : TableRowIterator(thd, table),
@@ -698,10 +714,17 @@ RefOrNullIterator::RefOrNullIterator(THD *thd, TABLE *table, TABLE_REF *ref,
 
 bool RefOrNullIterator::Init() {
   m_reading_first_row = true;
+  m_is_mvi_unique_filter_enabled = false;
   *m_ref->null_ref_key = false;
   if (table()->file->inited) return false;
   if (init_index(table(), table()->file, m_ref->key, m_use_order)) {
     return true;
+  }
+  // Enable & reset unique record filter for multi-valued index
+  if (table()->key_info[m_ref->key].flags & HA_MULTI_VALUED_KEY) {
+    table()->file->ha_extra(HA_EXTRA_ENABLE_UNIQUE_RECORD_FILTER);
+    table()->prepare_for_position();
+    m_is_mvi_unique_filter_enabled = true;
   }
   return set_record_buffer(table(), m_expected_rows);
 }
@@ -711,7 +734,7 @@ int RefOrNullIterator::Read() {
     /* Perform "Late NULLs Filtering" (see internals manual for explanations)
      */
     if (m_ref->impossible_null_ref() ||
-        construct_lookup_ref(thd(), table(), m_ref)) {
+        construct_lookup(thd(), table(), m_ref)) {
       // Skip searching for non-NULL rows; go straight to NULL rows.
       *m_ref->null_ref_key = true;
     }
@@ -726,8 +749,11 @@ int RefOrNullIterator::Read() {
         table()->record[0], key_buff_and_map.first, key_buff_and_map.second,
         HA_READ_KEY_EXACT);
   } else {
-    error = table()->file->ha_index_next_same(
-        table()->record[0], key_buff_and_map.first, m_ref->key_length);
+    // Fetch unique rows matching the Ref Key in case of multi-value index
+    do {
+      error = table()->file->ha_index_next_same(
+          table()->record[0], key_buff_and_map.first, m_ref->key_length);
+    } while (error == HA_ERR_KEY_NOT_FOUND && m_is_mvi_unique_filter_enabled);
   }
 
   if (error == 0) {
@@ -751,9 +777,16 @@ int RefOrNullIterator::Read() {
   }
 }
 
+RefOrNullIterator::~RefOrNullIterator() {
+  if (table()->key_info[m_ref->key].flags & HA_MULTI_VALUED_KEY &&
+      table()->file) {
+    table()->file->ha_extra(HA_EXTRA_DISABLE_UNIQUE_RECORD_FILTER);
+  }
+}
+
 AlternativeIterator::AlternativeIterator(
     THD *thd, TABLE *table, unique_ptr_destroy_only<RowIterator> source,
-    unique_ptr_destroy_only<RowIterator> table_scan_iterator, TABLE_REF *ref)
+    unique_ptr_destroy_only<RowIterator> table_scan_iterator, Index_lookup *ref)
     : RowIterator(thd),
       m_source_iterator(std::move(source)),
       m_table_scan_iterator(std::move(table_scan_iterator)),
@@ -870,7 +903,7 @@ int ZeroRowsAggregatedIterator::Read() {
   }
 
   // Mark tables as containing only NULL values
-  for (TABLE_LIST *table = m_join->query_block->leaf_tables; table;
+  for (Table_ref *table = m_join->query_block->leaf_tables; table;
        table = table->next_leaf) {
     table->table->set_null_row();
   }
@@ -936,7 +969,7 @@ int TableValueConstructorIterator::Read() {
 }
 
 static inline pair<uchar *, key_part_map> FindKeyBufferAndMap(
-    const TABLE_REF *ref) {
+    const Index_lookup *ref) {
   if (ref->keypart_hash != nullptr) {
     return make_pair(pointer_cast<uchar *>(ref->keypart_hash), key_part_map{1});
   } else {

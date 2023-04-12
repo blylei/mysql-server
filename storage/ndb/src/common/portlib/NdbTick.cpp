@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 */
 
 
+#include "util/require.h"
 #include <ndb_global.h>
 #include <NdbTick.h>
 #include <EventLogger.hpp>
@@ -117,7 +118,7 @@ void NdbTick_Init()
   assert(NdbDuration::tick_frequency != 0);
 
 #else
-  /* Considder to deprecate platforms not supporting monotonic counters */
+  /* Consider to deprecate platforms not supporting monotonic counters */
   //#error "A monotonic counter was not available on this platform"
 
   // gettimeofday() resolution is usec
@@ -165,7 +166,7 @@ const NDB_TICKS NdbTick_getCurrentTicks(void)
    * timespec arg is an invalid pointer.
    * As we test the clk_id in NdbTick_Init() at startup,
    * and is in control of the tp-arg ourself, it should be
-   * safe to assume that errors wil never be returned.
+   * safe to assume that errors will never be returned.
    */
   assert(res==0);
   (void)res;
@@ -197,7 +198,7 @@ const NDB_TICKS NdbTick_getCurrentTicks(void)
 
 #elif defined(_WIN32)
   LARGE_INTEGER t_cnt;
-  const BOOL res = QueryPerformanceCounter(&t_cnt);
+  const BOOL res [[maybe_unused]] = QueryPerformanceCounter(&t_cnt);
   /**
    * We tested support of QPC in NdbTick_Init().
    * Thus, it should not fail later.

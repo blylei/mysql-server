@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -33,8 +33,6 @@
 
 #include "mysqlrouter/metadata_cache.h"
 #include "mysqlrouter/rest_api_utils.h"
-
-constexpr const char RestClustersList::path_regex[];
 
 bool RestClustersList::on_handle_request(
     HttpRequest &req, const std::string & /* base_path */,

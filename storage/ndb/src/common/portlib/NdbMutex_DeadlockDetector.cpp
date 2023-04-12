@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -102,7 +102,7 @@ ndb_mutex_destoyed(NdbMutex* p)
   }
 
   /**
-   * And we need to remove ourselfs from after list of mutexes in out before list
+   * And we need to remove ourselves from after list of mutexes in out before list
    */
   for (unsigned i = 0; i<p->m_mutex_state->m_locked_before_list.m_used; i++)
   {

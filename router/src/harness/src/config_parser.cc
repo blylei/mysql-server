@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -52,9 +52,6 @@ using mysql_harness::utility::matches_glob;
 using mysql_harness::utility::strip;
 
 namespace mysql_harness {
-
-// satisfy ODR requirements
-constexpr const char *Config::DEFAULT_PATTERN;
 
 bool is_valid_conf_ident_char(const char ch) {
   return isalnum(ch) || ch == '_';
@@ -131,7 +128,7 @@ std::string ConfigSection::do_replace(const std::string &value,
   //
   // At any point of the iteration, everything before the mark is
   // already in the result string, and everything at the mark and
-  // later is not transfered to the result string.
+  // later is not transferred to the result string.
   for (auto current = value.begin(); current != value.end(); ++current) {
     if (inside_braces && *current == '}') {
       // Inside braces and found the end brace.
@@ -554,5 +551,7 @@ void Config::apply_overwrites() {
     }
   }
 }
+
+ConfigSection &Config::get_default_section() const { return *defaults_; }
 
 }  // namespace mysql_harness

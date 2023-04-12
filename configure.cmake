@@ -1,4 +1,4 @@
-# Copyright (c) 2009, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2009, 2022, Oracle and/or its affiliates.
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -115,10 +115,9 @@ IF(UNIX)
 
   # https://bugs.llvm.org/show_bug.cgi?id=16404
   IF(LINUX AND HAVE_UBSAN AND MY_COMPILER_IS_CLANG)
-    SET(CMAKE_EXE_LINKER_FLAGS_DEBUG
-      "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -rtlib=compiler-rt -lgcc_s")
-    SET(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO
-      "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} -rtlib=compiler-rt -lgcc_s")
+    STRING_APPEND(CMAKE_EXE_LINKER_FLAGS    " -rtlib=compiler-rt -lgcc_s")
+    STRING_APPEND(CMAKE_MODULE_LINKER_FLAGS " -rtlib=compiler-rt -lgcc_s")
+    STRING_APPEND(CMAKE_SHARED_LINKER_FLAGS " -rtlib=compiler-rt -lgcc_s")
   ENDIF()
 
   IF(WITH_ASAN)

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -57,7 +57,7 @@ struct Compare_key {
   ~Compare_key() = default;
 
   /** Compare two tuples.
-  @param[in] lhs                Tuple to comapre on the left hand side
+  @param[in] lhs                Tuple to compare on the left hand side
   @param[in] rhs                Tuple to compare on the Right hand side
   @retval +ve - if lhs > rhs
   @retval -ve - if lhs < rhs

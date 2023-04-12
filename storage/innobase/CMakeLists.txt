@@ -1,4 +1,4 @@
-# Copyright (c) 2006, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2006, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -36,6 +36,9 @@ IF(MSVC AND NOT WIN32_CLANG)
   ADD_COMPILE_OPTIONS("/W4")
   # Disable C4324: structure was padded due to __declspec(align())
   ADD_COMPILE_OPTIONS("/wd4324")
+  # Disable C4589: Constructor of abstract class 'dd::Entity_object_impl'
+  # ignores initializer for virtual base class 'dd::Weak_object'
+  ADD_COMPILE_OPTIONS("/wd4589")
 ENDIF()
 
 # TODO: Fix up all non-canonical include paths and remove this.
@@ -60,6 +63,7 @@ SET(INNOBASE_ZIP_DECOMPRESS_SOURCES
   os/os0thread.cc
   page/zipdecompress.cc
   rem/rec.cc
+  rem/rem0wrec.cc
   ut/crc32.cc
   ut/ut.cc
   ut/ut0new.cc)
@@ -97,6 +101,7 @@ SET(INNOBASE_SOURCES
   dict/dict0crea.cc
   dict/dict0dict.cc
   dict/dict0dd.cc
+  dict/dict0inst.cc
   dict/dict0load.cc
   dict/dict0mem.cc
   dict/dict0sdi.cc
@@ -167,9 +172,18 @@ SET(INNOBASE_SOURCES
   lock/lock0wait.cc
   log/log0buf.cc
   log/log0chkp.cc
+  log/log0consumer.cc
   log/log0ddl.cc
+  log/log0encryption.cc
+  log/log0files_capacity.cc
+  log/log0files_dict.cc
+  log/log0files_finder.cc
+  log/log0files_governor.cc
+  log/log0files_io.cc
   log/log0log.cc
   log/log0meb.cc
+  log/log0pfs.cc
+  log/log0pre_8_0_30.cc
   log/log0recv.cc
   log/log0test.cc
   log/log0write.cc
@@ -192,6 +206,7 @@ SET(INNOBASE_SOURCES
   read/read0read.cc
   rem/rem0cmp.cc
   rem/rem0rec.cc
+  rem/rem0wrec.cc
   row/row0ext.cc
   row/row0import.cc
   row/row0ins.cc
@@ -229,6 +244,7 @@ SET(INNOBASE_SOURCES
   usr/usr0sess.cc
   ut/ut0dbg.cc
   ut/ut0list.cc
+  ut/ut0math.cc
   ut/ut0mem.cc
   ut/ut0new.cc
   ut/ut0rbt.cc
@@ -245,6 +261,25 @@ IF(MY_COMPILER_IS_GNU AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
     COMPILE_FLAGS "-Wno-free-nonheap-object")
 ENDIF()
 
+# The combination of
+# ut_ad(strlen(dir_path) + 1 + strlen(dir_name) + 1 < sizeof(path))
+# and
+# snprintf(path, sizeof(path), "%s%c%s", dir_path, OS_PATH_SEPARATOR, dir_name);
+# gives a warning: -Werror=format-truncation=
+IF(MY_COMPILER_IS_GNU AND
+    CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11 AND
+    CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG" AND
+    CMAKE_CXX_FLAGS MATCHES " -O2 ")
+  ADD_COMPILE_FLAGS(arch/arch0arch.cc COMPILE_FLAGS "-Wformat-truncation=0")
+ENDIF()
+
+IF(MSVC)
+  # TODO(Bug#33985941): update the code and remove the disabled warnings
+  MY_ADD_COMPILE_DEFINITIONS(os/os0file.cc
+    COMPILE_DEFINITIONS "_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING"
+    )
+ENDIF()
+
 IF(MSVC AND NOT WIN32_CLANG)
   # Disable C4505: unreferenced local function has been removed
   ADD_COMPILE_FLAGS(pars/lexyy.cc COMPILE_FLAGS "/wd4505")
@@ -256,12 +291,6 @@ IF(MSVC AND NOT WIN32_CLANG)
   ADD_COMPILE_FLAGS(fts/fts0pars.cc COMPILE_FLAGS "/wd4100 /wd4701 /wd4702")
 
   # Temporary disables for warnings that are not yet fixed:
-  # C4100: unreferenced formal parameter
-  ADD_COMPILE_OPTIONS("/wd4100")
-  # C4127	conditional expression is constant
-  ADD_COMPILE_OPTIONS("/wd4127")
-  # C4245: conversion from 'X'' to 'Y', signed/unsigned mismatch
-  ADD_COMPILE_OPTIONS("/wd4245")
   # C4456: declaration of 'X' hides local declaration
   ADD_COMPILE_OPTIONS("/wd4456")
   # C4457: declaration of 'X' hides function parameter
@@ -270,8 +299,6 @@ IF(MSVC AND NOT WIN32_CLANG)
   ADD_COMPILE_OPTIONS("/wd4458")
   # C4459: declaration of 'X' hides global declaration
   ADD_COMPILE_OPTIONS("/wd4459")
-  # C4389: '==': signed/unsigned mismatch
-  ADD_COMPILE_OPTIONS("/wd4389")
 ENDIF()
 
 # There seems to be a bug in gcc for Oracle Linux 8 on ARM.
@@ -328,6 +355,11 @@ IF(HAS_WARN_FLAG)
     COMPILE_FLAGS "${HAS_WARN_FLAG}")
 ENDIF()
 MY_CHECK_CXX_COMPILER_WARNING("-Wcast-function-type" HAS_WARN_FLAG)
+IF(HAS_WARN_FLAG)
+  ADD_COMPILE_FLAGS(fts/fts0pars.cc
+    COMPILE_FLAGS "${HAS_WARN_FLAG}")
+ENDIF()
+MY_CHECK_CXX_COMPILER_WARNING("-Wunused-but-set-variable" HAS_WARN_FLAG)
 IF(HAS_WARN_FLAG)
   ADD_COMPILE_FLAGS(fts/fts0pars.cc
     COMPILE_FLAGS "${HAS_WARN_FLAG}")

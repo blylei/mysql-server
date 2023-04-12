@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -136,9 +136,17 @@ void init_windows_sockets();
  *
  * @param port TCP port that will be checked
  *
- * @returns true if the selected port is available, false otherwise
+ * @returns true if the selected port is not used, false otherwise
  */
-[[nodiscard]] bool is_port_available(const uint16_t port);
+[[nodiscard]] bool is_port_unused(const uint16_t port);
+
+/** @brief Check if a given port can be bind to.
+ *
+ * @param port TCP port that will be checked
+ *
+ * @returns true if the selected port can be bind to, false otherwise
+ */
+[[nodiscard]] bool is_port_bindable(const uint16_t port);
 
 /**
  * Wait until the port is not available (is used by any application).
@@ -149,7 +157,7 @@ void init_windows_sockets();
  * @return false if the port is still available after the timeout expiry,
  *         true otherwise.
  */
-[[nodiscard]] bool wait_for_port_not_available(
+[[nodiscard]] bool wait_for_port_used(
     const uint16_t port,
     std::chrono::milliseconds timeout = std::chrono::seconds(10));
 
@@ -162,7 +170,7 @@ void init_windows_sockets();
  * @return false if the port is still not available after the timeout expiry,
  *         true otherwise.
  */
-[[nodiscard]] bool wait_for_port_available(
+[[nodiscard]] bool wait_for_port_unused(
     const uint16_t port,
     std::chrono::milliseconds timeout = std::chrono::seconds(10));
 
@@ -182,7 +190,7 @@ void init_keyring(std::map<std::string, std::string> &default_section,
 /** @brief returns true if the selected file contains a string
  *          that is true for a given predicate
  *
- * @param file_path path to the file we want to serach
+ * @param file_path path to the file we want to search
  * @param predicate predicate to test the file
  * @param sleep_time max time to wait for the entry in the file
  * @deprecated use wait_log_contains() or get_file_output() with
@@ -235,21 +243,20 @@ bool add_line_to_config_file(const std::string &config_path,
                              const std::string &key, const std::string &value);
 
 /**
- * Wait for the nth occurence of the log_regex in the log_file with timeout
+ * Wait for the nth occurrence of the log_regex in the log_file with timeout
  * If it's found returns the timepoint from the matched line prefix
  * If timed out or failed to convert the timestamp returns unexpected
  *
  * @param log_file path to file containing router log
  * @param log_regex value that is going to be searched for in the log
- * @param occurence number denoting which occurence of a log_regex is expected
+ * @param occurence number denoting which occurrence of a log_regex is expected
  * @param timeout number of milliseconds we are going to wait for the log_regex
  * to occur at expected position
  *
- * @retval if log_regex is found at expected position return the timestamp of
+ * @returns if log_regex is found at expected position return the timestamp of
  * this log
- * @retval unexpected otherwise
  */
-stdx::expected<std::chrono::time_point<std::chrono::system_clock>, void>
+std::optional<std::chrono::time_point<std::chrono::system_clock>>
 get_log_timestamp(
     const std::string &log_file, const std::string &log_regex,
     const unsigned occurence = 1,

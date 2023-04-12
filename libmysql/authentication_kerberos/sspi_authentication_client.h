@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -20,8 +20,8 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#ifndef AUTH_GSSAPI_CLIENT_H_
-#define AUTH_GSSAPI_CLIENT_H_
+#ifndef AUTH_SSAPI_CLIENT_H_
+#define AUTH_SSAPI_CLIENT_H_
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,4 +67,4 @@ class Sspi_client : public I_Kerberos_client {
   std::string m_kdc_host;
   CredHandle m_cred;
 };
-#endif  // AUTH_GSSAPI_CLIENT_H_
+#endif  // AUTH_SSAPI_CLIENT_H_

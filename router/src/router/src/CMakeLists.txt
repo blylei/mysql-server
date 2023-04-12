@@ -1,4 +1,4 @@
-# Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -20,6 +20,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+INCLUDE(GenerateExportHeader)
+
 # MS Visual C++ specifics
 IF(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_WARNINGS)  # bypass Warning C4996 (getenv)
@@ -30,10 +32,8 @@ SET(lib_source_files
   certificate_generator.cc
   certificate_handler.cc
   config_files.cc
-  config_generator.cc
   cluster_metadata.cc
   cluster_metadata_dynamic_state.cc
-  router_app.cc
   sys_user_operations.cc
   utils.cc
   uri.cc
@@ -43,14 +43,6 @@ SET(lib_source_files
   common/mysql_session.cc
   common/utils_sqlstring.cc
   )
-IF(WIN32)
-  LIST(APPEND lib_source_files
-    windows/main-windows.cc
-    windows/nt_servc.cc
-    windows/password_vault.cc
-    windows/service_operations.cc
-    )
-ENDIF()
 
 SET(source_files main.cc)
 
@@ -60,13 +52,10 @@ IF(WIN32)
     ../../harness/src/logging/eventlog_rc/MSG00001.bin)
 ENDIF()
 
-IF(WIN32)
-  # on Windows, we statically link the router lib to otherwise avoid
-  # exporting a bunch of symbols
-  ADD_LIBRARY(router_lib STATIC ${lib_source_files})
-ELSE()
-  ADD_LIBRARY(router_lib SHARED ${lib_source_files} ${common_files})
-ENDIF()
+ADD_LIBRARY(router_lib
+  SHARED
+  ${lib_source_files}
+  ${common_files})
 TARGET_LINK_LIBRARIES(router_lib
   ${CMAKE_DL_LIBS}
   harness-library
@@ -77,7 +66,8 @@ TARGET_LINK_LIBRARIES(router_lib
   )
 TARGET_INCLUDE_DIRECTORIES(router_lib
   PUBLIC
-  ../include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../include
+  ${CMAKE_CURRENT_BINARY_DIR}/../include
   )
 
 SET_TARGET_PROPERTIES(router_lib PROPERTIES
@@ -100,15 +90,47 @@ ENDIF()
 ADD_INSTALL_RPATH_FOR_OPENSSL(router_lib)
 SET_PATH_TO_CUSTOM_SSL_FOR_APPLE(router_lib)
 
+GENERATE_EXPORT_HEADER(router_lib
+  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/../include/mysqlrouter/router_export.h)
+
+SET(frontend_lib_source_files
+  router_app.cc
+  config_generator.cc
+  )
+
+IF(WIN32)
+  LIST(APPEND frontend_lib_source_files
+    windows/main-windows.cc
+    windows/nt_servc.cc
+    windows/password_vault.cc
+    windows/service_operations.cc
+    )
+ENDIF()
+
+ADD_LIBRARY(router_frontend_lib STATIC
+  ${frontend_lib_source_files})
+
+TARGET_LINK_LIBRARIES(router_frontend_lib
+  router_lib
+  harness-library)
+
+TARGET_INCLUDE_DIRECTORIES(router_frontend_lib
+  PUBLIC
+  ${PROJECT_SOURCE_DIR}/src/routing/include/
+  ${PROJECT_SOURCE_DIR}/src/metadata_cache/include/
+  ${PROJECT_SOURCE_DIR}/src/http/include/
+  ${PROJECT_SOURCE_DIR}/src/rest_api/include/
+)
+
 MYSQL_ADD_EXECUTABLE(mysqlrouter
   ${source_files}
   COMPONENT Router
   LINK_LIBRARIES
   harness-library
   router_lib
+  router_frontend_lib
   ${CMAKE_DL_LIBS}
   )
-
 ADD_INSTALL_RPATH(mysqlrouter "${ROUTER_INSTALL_RPATH}")
 
 IF(SOLARIS)

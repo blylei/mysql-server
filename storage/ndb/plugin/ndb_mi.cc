@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -36,7 +36,7 @@
 
   The global structure requires locking to prevent that channels
   are added or removed by concurrent replication setup commands while
-  accesing it.
+  accessing it.
 
   So far the cluster replication only works with the default channel.
 */

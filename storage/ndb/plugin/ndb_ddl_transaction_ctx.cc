@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 // Implements the interface defined in
 #include "storage/ndb/plugin/ndb_ddl_transaction_ctx.h"
 
+#include "my_dbug.h"
 #include "sql/handler.h"
 #include "sql/sql_class.h"
 #include "sql/sql_lex.h"
@@ -69,6 +70,12 @@ bool Ndb_DDL_transaction_ctx::rollback_create_table(
 
   DBUG_PRINT("info",
              ("Rollback : Dropping table '%s.%s'", db_name, table_name));
+
+  DBUG_EXECUTE_IF("ndb_simulate_failure_during_rollback", {
+    DBUG_SET("-d,ndb_simulate_failure_during_rollback");
+    thd_ndb->push_warning("Failed to rollback after CREATE TABLE failure.");
+    return false;
+  });
 
   /* Drop the table created during this DDL execution */
   Ndb *ndb = thd_ndb->ndb;
@@ -350,9 +357,9 @@ bool Ndb_DDL_transaction_ctx::post_ddl_hook_drop_temp_table(
     DBUG_PRINT("info", ("ALTER to different engine = '%s' detected",
                         ha_resolve_storage_engine_name(create_info->db_type)));
 
-    const char *orig_db_name = m_thd->lex->query_block->table_list.first->db;
+    const char *orig_db_name = m_thd->lex->query_block->get_table_list()->db;
     const char *orig_table_name =
-        m_thd->lex->query_block->table_list.first->table_name;
+        m_thd->lex->query_block->get_table_list()->table_name;
     DBUG_PRINT("info",
                ("original table name: '%s.%s'", orig_db_name, orig_table_name));
 

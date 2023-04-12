@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -166,14 +166,14 @@ NdbObjectIdMap::unmap(Uint32 id, void *object)
       DBUG_PRINT("error",("NdbObjectIdMap::unmap(%u, %p) obj=%p",
                           id, object, obj));
       assert(false);
-      return 0;
+      return nullptr;
     }
     
     DBUG_PRINT("info",("NdbObjectIdMap::unmap(%u) obj=%p", id, obj));
     
     return obj;
   }
-  return 0;
+  return nullptr;
 }
 
 inline void *
@@ -185,13 +185,13 @@ NdbObjectIdMap::getObject(Uint32 id) const
   {
     if(m_map[id].isFree())
     {
-      return 0;
+      return nullptr;
     }
     else
     {
       return m_map[id].getObj();
     }
   }
-  return 0;
+  return nullptr;
 }
 #endif

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -219,7 +219,7 @@ class CPCD {
 
     /** Session Id to which the Process belongs
      *
-     * @note Used to validate if requests are comming from the same session
+     * @note Used to validate if requests are coming from the same session
      *       that created these processes. Should apply to temporary processes
      *       only.
      */
@@ -347,7 +347,7 @@ class CPCD {
     /** Creates a new CPCD::Monitor object, connected to the specified
      *	CPCD.
      *  A new thread will be created, which will poll the processes of
-     *  the CPCD at the specifed interval.
+     *  the CPCD at the specified interval.
      */
     Monitor(CPCD *cpcd, int poll = CPCD_DEFAULT_POLLING_INTERVAL);
 

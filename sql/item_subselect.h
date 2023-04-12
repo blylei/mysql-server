@@ -1,7 +1,7 @@
 #ifndef ITEM_SUBSELECT_INCLUDED
 #define ITEM_SUBSELECT_INCLUDED
 
-/* Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2002, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -69,7 +69,7 @@ class Temp_table_param;
 class my_decimal;
 class subselect_indexsubquery_engine;
 struct AccessPath;
-struct TABLE_LIST;
+class Table_ref;
 
 template <class T>
 class List;
@@ -118,7 +118,7 @@ class Item_subselect : public Item_result_field {
 
   // For EXPLAIN. Only valid if engine_type() == HASH_SJ_ENGINE.
   const TABLE *get_table() const;
-  const TABLE_REF &get_table_ref() const;
+  const Index_lookup &index_lookup() const;
   join_type get_join_type() const;
 
   void create_iterators(THD *thd);
@@ -359,6 +359,8 @@ class Item_singlerow_subselect : public Item_subselect {
     @return the Query_block structure that was given in the constructor.
   */
   Query_block *invalidate_and_restore_query_block();
+  std::optional<ContainedSubquery> get_contained_subquery(
+      const Query_block *outer_query_block) override;
   friend class Query_result_scalar_subquery;
 };
 
@@ -427,11 +429,11 @@ class Item_exists_subselect : public Item_subselect {
   /**
     Used by subquery optimizations to keep track about where this subquery
     predicate is located, and whether it is a candidate for transformation.
-      (TABLE_LIST*) 1   - the predicate is an AND-part of the WHERE
-      join nest pointer - the predicate is an AND-part of ON expression
-                          of a join nest
-      NULL              - for all other locations. It also means that the
-                          predicate is not a candidate for transformation.
+      (Table_ref*) 1 - the predicate is an AND-part of the WHERE
+      join nest pointer    - the predicate is an AND-part of ON expression
+                             of a join nest
+      NULL                 - for all other locations. It also means that the
+                             predicate is not a candidate for transformation.
     See also THD::emb_on_expr_nest.
 
     As for the second case above (the join nest pointer), note that this value
@@ -439,7 +441,7 @@ class Item_exists_subselect : public Item_subselect {
     cf. transform_scalar_subqueries_to_join_with_derived, due to the need to
     build new join nests. The change is performed in Query_block::nest_derived.
   */
-  TABLE_LIST *embedding_join_nest{nullptr};
+  Table_ref *embedding_join_nest{nullptr};
 
   Item_exists_subselect(Query_block *select);
 
@@ -688,8 +690,9 @@ class Item_in_subselect : public Item_exists_subselect {
      last steps of this transformation.
   */
   bool finalize_materialization_transform(THD *thd, JOIN *join);
-
   AccessPath *root_access_path() const override;
+  std::optional<ContainedSubquery> get_contained_subquery(
+      const Query_block *outer_query_block) override;
 
   friend class Item_ref_null_helper;
   friend class Item_is_not_null_test;
@@ -725,7 +728,7 @@ class SubqueryWithResult {
   /**
     Cleanup subquery after complete query execution, free all resources.
   */
-  void cleanup(THD *thd);
+  void cleanup();
   bool prepare(THD *thd);
   void fix_length_and_dec(Item_cache **row);
   /**
@@ -800,8 +803,8 @@ class subselect_indexsubquery_engine {
   Query_result_union *result = nullptr; /* results storage class */
   /// Table which is read, using one of eq_ref, ref, ref_or_null.
   TABLE *table{nullptr};
-  TABLE_LIST *table_ref{nullptr};
-  TABLE_REF ref;
+  Table_ref *table_ref{nullptr};
+  Index_lookup ref;
   join_type type{JT_UNKNOWN};
   Item *cond;     /* The WHERE condition of subselect */
   ulonglong hash; /* Hash value calculated by RefIterator, when needed. */
@@ -822,8 +825,9 @@ class subselect_indexsubquery_engine {
  public:
   enum enum_engine_type { INDEXSUBQUERY_ENGINE, HASH_SJ_ENGINE };
 
-  subselect_indexsubquery_engine(TABLE *table, TABLE_LIST *table_ref,
-                                 const TABLE_REF &ref, enum join_type join_type,
+  subselect_indexsubquery_engine(TABLE *table, Table_ref *table_ref,
+                                 const Index_lookup &ref,
+                                 enum join_type join_type,
                                  Item_in_subselect *subs, Item *where,
                                  Item *having_arg)
       : table(table),
@@ -837,7 +841,7 @@ class subselect_indexsubquery_engine {
   virtual bool exec(THD *thd);
   virtual void print(const THD *thd, String *str, enum_query_type query_type);
   virtual enum_engine_type engine_type() const { return INDEXSUBQUERY_ENGINE; }
-  virtual void cleanup(THD *) {}
+  virtual void cleanup() {}
   virtual void create_iterators(THD *) {}
 };
 
@@ -893,13 +897,13 @@ class subselect_hash_sj_engine final : public subselect_indexsubquery_engine {
   ~subselect_hash_sj_engine() override;
 
   bool setup(THD *thd, const mem_root_deque<Item *> &tmp_columns);
-  void cleanup(THD *thd) override;
+  void cleanup() override;
   bool exec(THD *thd) override;
   void print(const THD *thd, String *str, enum_query_type query_type) override;
   enum_engine_type engine_type() const override { return HASH_SJ_ENGINE; }
 
   TABLE *get_table() const { return table; }
-  const TABLE_REF &get_table_ref() const { return ref; }
+  const Index_lookup &index_lookup() const { return ref; }
   enum join_type get_join_type() const { return type; }
   AccessPath *root_access_path() const { return m_root_access_path; }
   void create_iterators(THD *thd) override;
@@ -921,9 +925,11 @@ class subselect_hash_sj_engine final : public subselect_indexsubquery_engine {
 
   @param thd    Thread handle.
   @param conds  Condition; may be nullptr.
+  @param copy   true if a copy of the new condition needs to be returned
+                (used in case of hypergraph optimizer).
   @returns      new condition
  */
-Item *remove_in2exists_conds(THD *thd, Item *conds);
+Item *remove_in2exists_conds(THD *thd, Item *conds, bool copy);
 
 /// Returns whether the Item is an IN-subselect.
 bool IsItemInSubSelect(Item *item);

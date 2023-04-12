@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2008, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -396,6 +396,29 @@ void PFS_memory_monitoring_stat::reset() {
   m_high_count_used = 0;
   m_low_size_used = 0;
   m_high_size_used = 0;
+}
+
+void PFS_session_all_memory_stat::reset() {
+  m_controlled.reset();
+  m_total.reset();
+}
+
+void PFS_session_all_memory_stat::count_controlled_alloc(size_t size) {
+  m_controlled.count_alloc(size);
+  m_total.count_alloc(size);
+}
+
+void PFS_session_all_memory_stat::count_uncontrolled_alloc(size_t size) {
+  m_total.count_alloc(size);
+}
+
+void PFS_session_all_memory_stat::count_controlled_free(size_t size) {
+  m_controlled.count_free(size);
+  m_total.count_free(size);
+}
+
+void PFS_session_all_memory_stat::count_uncontrolled_free(size_t size) {
+  m_total.count_free(size);
 }
 
 void PFS_memory_monitoring_stat::normalize(bool global) {

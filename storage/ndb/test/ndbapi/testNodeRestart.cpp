@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include <cstring>
 #include <NDBT.hpp>
 #include <NDBT_Test.hpp>
@@ -7947,7 +7948,7 @@ runBug16895311_create(NDBT_Context* ctx, NDBT_Step* step)
     (void)pDic->dropTable(bug.tabname);
     NdbDictionary::Table tab;
     tab.setName(bug.tabname);
-    const char* csname = "utf8_unicode_ci";
+    const char* csname = "utf8mb3_unicode_ci";
     bug.cs = get_charset_by_name(csname, MYF(0));
     require(bug.cs != 0);
     // can hit too small xfrm buffer in 2 ways
@@ -9342,7 +9343,7 @@ int runTestStartNode(NDBT_Context* ctx, NDBT_Step* step){
  * The test loops for more than 2048 times to ensure that we come
  * to a situation with a large number of parts in each LCP and in
  * particular for the last one that we are to restore. The number
- * 2058 is somewhat arbitrarily choosen to ensure this.
+ * 2058 is somewhat arbitrarily chosen to ensure this.
  *
  * The test case is hardcoded to make those special LCPs in node 2.
  *
@@ -9957,7 +9958,7 @@ int runCreateCharKeyTable(NDBT_Context* ctx, NDBT_Step* step)
     {
       ndbout_c("Using non case-sensitive charset");
       charsetName = "latin1_swedish_ci";
-//    charsetName = "utf8_unicode_ci";
+//    charsetName = "utf8mb3_unicode_ci";
     }
     else
     {
@@ -10406,7 +10407,7 @@ int runChangePkCharKeyTable(NDBT_Context* ctx, NDBT_Step* step)
         /**
          * For case-sensitive collations, we must use correct case
          * when specifying keys.
-         * For case-insenstive collations, we do not need to, so use
+         * For case-insensitive collations, we do not need to, so use
          * the 'to' case for the key, and the 'to' value.
          */
         const char toCaseKey = ((cycle? 'A' : 'a') + i);
@@ -10554,6 +10555,95 @@ int runClearErrorInsert(NDBT_Context* ctx, NDBT_Step* step)
 }
 
 
+int runWatchdogSlowShutdown(NDBT_Context* ctx, NDBT_Step* step)
+{
+  /* Steps
+   * 1 Set low watchdog threshold
+   * 2 Get error reporter to be slow during shutdown
+   * 3 Trigger shutdown
+   *
+   * Expectation
+   * - Shutdown triggered, but slow
+   * - Watchdog detects and also attempts shutdown
+   * - No crash results, shutdown completes eventually
+   */
+
+  NdbRestarter restarter;
+
+  /* 1 Set low watchdog threshold */
+  {
+    const int dumpVals[] = {DumpStateOrd::CmvmiSetWatchdogInterval, 2000 };
+    CHECK((restarter.dumpStateAllNodes(dumpVals, 2) == NDBT_OK),
+          "Failed to set watchdog thresh");
+  }
+
+  /* 2 Use error insert to get error reporter to be slow
+   *   during shutdown
+   */
+  {
+    const int dumpVals[] = {DumpStateOrd::CmvmiSetErrorHandlingError, 1 };
+    CHECK((restarter.dumpStateAllNodes(dumpVals, 2) == NDBT_OK),
+          "Failed to set error handling mode");
+  }
+
+  /* 3 Trigger shutdown */
+  const int nodeId = restarter.getNode(NdbRestarter::NS_RANDOM);
+  g_err << "Injecting crash in node " << nodeId << endl;
+  /* First request a 'NOSTART' restart on error insert */
+  {
+    const int dumpVals[] = {DumpStateOrd::CmvmiSetRestartOnErrorInsert, 1};
+    CHECK((restarter.dumpStateOneNode(nodeId, dumpVals, 2) == NDBT_OK),
+          "Failed to request error insert restart");
+  }
+
+  /* Next cause an error insert failure */
+  CHECK((restarter.insertErrorInNode(nodeId, 9999) == NDBT_OK),
+        "Failed to request node crash");
+
+  /* Expect shutdown to be stalled, and shortly after, watchdog
+   * to detect this and act
+   */
+  g_err << "Waiting for node " << nodeId << " to stop." << endl;
+  CHECK((restarter.waitNodesNoStart(&nodeId, 1) == NDBT_OK),
+        "Timeout waiting for node to stop");
+
+  g_err << "Waiting for node " << nodeId << " to start." << endl;
+  CHECK((restarter.startNodes(&nodeId, 1) == NDBT_OK),
+        "Timeout waiting for node to start");
+
+  CHECK((restarter.waitClusterStarted() == NDBT_OK),
+        "Timeout waiting for cluster to start");
+
+  g_err << "Success" << endl;
+  return NDBT_OK;
+}
+
+int runWatchdogSlowShutdownCleanup(NDBT_Context* ctx, NDBT_Step* step)
+{
+  NdbRestarter restarter;
+
+  g_err << "Cleaning up" << endl;
+
+  /* Cleanup special measures */
+  {
+    const int dumpVals[] = {DumpStateOrd::CmvmiSetWatchdogInterval};
+    if (restarter.dumpStateAllNodes(dumpVals, 1) != NDBT_OK)
+    {
+      g_err << "Failed to clear interval" << endl;
+      return NDBT_FAILED;
+    }
+  }
+  {
+    const int dumpVals[] = {DumpStateOrd::CmvmiSetErrorHandlingError};
+    if (restarter.dumpStateAllNodes(dumpVals, 1) != NDBT_OK)
+    {
+      g_err << "Failed to clear error handlng" << endl;
+      return NDBT_FAILED;
+    }
+  }
+
+  return NDBT_OK;
+}
 
 NDBT_TESTSUITE(testNodeRestart);
 TESTCASE("NoLoad", 
@@ -11405,6 +11495,12 @@ TESTCASE("ChangeNumLogPartsINR",
   STEP(runPkUpdateUntilStopped);
   STEP(runChangeNumLogPartsINR);
   FINALIZER(runClearTable);
+}
+TESTCASE("WatchdogSlowShutdown",
+         "Watchdog reacts to slow exec thread shutdown")
+{
+  INITIALIZER(runWatchdogSlowShutdown);
+  FINALIZER(runWatchdogSlowShutdownCleanup);
 }
 
 NDBT_TESTSUITE_END(testNodeRestart)

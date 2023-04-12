@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -116,7 +116,7 @@ public:
   bool closeToTimeout(int safety_percent = 0);
 
   /**
-   * Get config by beeing friend to ndb_cluster_connection_impl - ugly
+   * Get config by being friend to ndb_cluster_connection_impl - ugly
    */
   NdbApiConfig const& getConfig() const;
 
@@ -245,7 +245,7 @@ public:
     { return "StepThreadStackSize"; }
 
   // This is the default executor of a test case
-  // When a test case is executed it will need to be suplied with a number of 
+  // When a test case is executed it will need to be supplied with a number of 
   // different parameters and settings, these are passed to the test in the 
   // NDBT_Context object
   virtual int execute(NDBT_Context*);

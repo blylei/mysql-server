@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,16 +24,24 @@
 #define SQL_JOIN_OPTIMIZER_COST_MODEL_H_
 
 #include "my_base.h"
+#include "sql/join_optimizer/access_path.h"
 #include "sql/join_optimizer/relational_expression.h"
 #include "sql/mem_root_array.h"
 
 struct AccessPath;
 struct ContainedSubquery;
 class Item;
-struct JoinPredicate;
 class Query_block;
 class THD;
 struct TABLE;
+
+/**
+   When we make cost estimates, we use this as the maximal length the
+   values we get from evaluating an Item (in bytes). Actual values of
+   e.g. blobs may be much longer, but even so we use this as an upper
+   limit when doing cost calculations. (For context, @see Item#max_length .)
+*/
+constexpr size_t kMaxItemLengthEstimate = 4096;
 
 // These are extremely arbitrary cost model constants. We should revise them
 // based on actual query times (possibly using linear regression?), and then
@@ -49,17 +57,25 @@ constexpr double kWindowOneRowCost = 0.1;
 
 /// See EstimateFilterCost.
 struct FilterCost {
-  // Cost of evaluating the filter if nothing in particular is done with it.
-  double cost_if_not_materialized;
+  /// Cost of evaluating the filter for all rows if subqueries are not
+  /// materialized.  (Note that this includes the contribution from
+  /// init_cost_if_not_materialized.)
+  double cost_if_not_materialized{0.0};
 
-  // Cost of evaluating the filter if all subqueries in it have been
-  // materialized beforehand. If there are no subqueries in the condition,
-  // equals cost_if_not_materialized.
-  double cost_if_materialized;
+  /// Initial cost before the filter can be applied for the first time.
+  /// Typically the cost of executing 'independent subquery' in queries like:
+  /// "SELECT * FROM tab WHERE field = <independent subquery>".
+  /// (That corresponds to the Item_singlerow_subselect class.)
+  double init_cost_if_not_materialized{0.0};
 
-  // Cost of materializing all subqueries present in the filter.
-  // If there are no subqueries in the condition, equals zero.
-  double cost_to_materialize;
+  /// Cost of evaluating the filter for all rows if all subqueries in
+  /// it have been materialized beforehand. If there are no subqueries
+  /// in the condition, equals cost_if_not_materialized.
+  double cost_if_materialized{0.0};
+
+  /// Cost of materializing all subqueries present in the filter.
+  /// If there are no subqueries in the condition, equals zero.
+  double cost_to_materialize{0.0};
 };
 
 /// Used internally by EstimateFilterCost() only.
@@ -72,7 +88,7 @@ void AddCost(THD *thd, const ContainedSubquery &subquery, double num_rows,
   of any subqueries that may be present and that need evaluation.
  */
 FilterCost EstimateFilterCost(THD *thd, double num_rows, Item *condition,
-                              Query_block *outer_query_block);
+                              const Query_block *outer_query_block);
 
 /**
   A cheaper overload of EstimateFilterCost() that assumes that all
@@ -83,7 +99,7 @@ FilterCost EstimateFilterCost(THD *thd, double num_rows, Item *condition,
 inline FilterCost EstimateFilterCost(
     THD *thd, double num_rows,
     const Mem_root_array<ContainedSubquery> &contained_subqueries) {
-  FilterCost cost{0.0, 0.0, 0.0};
+  FilterCost cost;
   cost.cost_if_not_materialized = num_rows * kApplyOneFilterCost;
   cost.cost_if_materialized = num_rows * kApplyOneFilterCost;
 
@@ -95,12 +111,53 @@ inline FilterCost EstimateFilterCost(
 
 double EstimateCostForRefAccess(THD *thd, TABLE *table, unsigned key_idx,
                                 double num_output_rows);
-void EstimateSortCost(AccessPath *path, ha_rows limit_rows = HA_POS_ERROR);
+void EstimateSortCost(AccessPath *path);
 void EstimateMaterializeCost(THD *thd, AccessPath *path);
-void EstimateAggregateCost(AccessPath *path);
+
+/**
+   Estimate costs and result row count for an aggregate operation.
+   @param[in,out] path The AGGREGATE path.
+   @param[in] query_block The Query_block to which 'path' belongs.
+   @param[in,out] trace Optimizer trace text.
+ */
+void EstimateAggregateCost(AccessPath *path, const Query_block *query_block,
+                           std::string *trace = nullptr);
 void EstimateDeleteRowsCost(AccessPath *path);
-double FindOutputRowsForJoin(AccessPath *left_path, AccessPath *right_path,
-                             const JoinPredicate *edge,
-                             double right_path_already_applied_selectivity);
+void EstimateUpdateRowsCost(AccessPath *path);
+
+/// Estimate the costs and row count for a STREAM AccessPath.
+void EstimateStreamCost(AccessPath *path);
+
+/// Estimate the costs and row count for a LIMIT_OFFSET AccessPath.
+void EstimateLimitOffsetCost(AccessPath *path);
+
+inline double FindOutputRowsForJoin(double left_rows, double right_rows,
+                                    const JoinPredicate *edge) {
+  double fanout = right_rows * edge->selectivity;
+  if (edge->expr->type == RelationalExpression::LEFT_JOIN) {
+    // For outer joins, every outer row produces at least one row (if none
+    // are matching, we get a NULL-complemented row).
+    // Note that this can cause inconsistent row counts; see bug #33550360
+    // and/or JoinHypergraph::has_reordered_left_joins.
+    fanout = std::max(fanout, 1.0);
+  } else if (edge->expr->type == RelationalExpression::SEMIJOIN) {
+    // Semi- and antijoin estimation is pretty tricky, since we want isn't
+    // really selectivity; we want the probability that at least one row
+    // is matching, which is something else entirely. However, given that
+    // we only have selectivity to work with, we don't really have anything
+    // better than to estimate it as a normal join and cap the result
+    // at selectivity 1.0 (ie., each outer row generates at most one inner row).
+    // Note that this can cause inconsistent row counts; see bug #33550360 and
+    // CostingReceiver::has_semijoin_with_possibly_clamped_child.
+    fanout = std::min(fanout, 1.0);
+  } else if (edge->expr->type == RelationalExpression::ANTIJOIN) {
+    // Antijoin are estimated as simply the opposite of semijoin (see above),
+    // but wrongly estimating 0 rows (or, of course, a negative amount) could be
+    // really bad, so we assume at least 10% coming out as a fudge factor.
+    // It's better to estimate too high than too low here.
+    fanout = std::max(1.0 - fanout, 0.1);
+  }
+  return left_rows * fanout;
+}
 
 #endif  // SQL_JOIN_OPTIMIZER_COST_MODEL_H_

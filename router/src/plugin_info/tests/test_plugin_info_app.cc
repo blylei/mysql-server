@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -61,7 +61,7 @@ class PluginInfoAppTest : public ::testing::Test {
 
   void verify_version_output();
   void verify_plugin_info(const std::string &brief, const std::string &version,
-                          const std::string &requires,
+                          const std::string &requires_plugins,
                           const std::string &conflicts);
 
   std::string get_plugin_file_path(const std::string &plugin_name);
@@ -140,7 +140,7 @@ void PluginInfoAppTest::verify_version_output() {
 
 void PluginInfoAppTest::verify_plugin_info(const std::string &brief,
                                            const std::string &version,
-                                           const std::string &requires,
+                                           const std::string &requires_plugins,
                                            const std::string &conflicts) {
   EXPECT_THAT(out_stream_err_.str(), StrEq(""));
 
@@ -164,7 +164,7 @@ void PluginInfoAppTest::verify_plugin_info(const std::string &brief,
       version +
       "\",\n"
       "    \"requires\": [" +
-      requires +
+      requires_plugins +
       "],\n"
       "    \"conflicts\": [" +
       conflicts +
@@ -303,25 +303,26 @@ TEST_P(PluginInfoAppTestReadInfo, ReadInfo) {
 }
 
 const Plugin_data router_plugins[]{
-    Plugin_data{"routing",
-                "Routing MySQL connections between MySQL clients/connectors "
-                "and servers",
-                "0.0.1", R"(
+    {"routing",
+     "Routing MySQL connections between MySQL clients/connectors "
+     "and servers",
+     "0.0.1", R"(
         "logger",
         "router_protobuf",
         "router_openssl",
-        "io"
+        "io",
+        "connection_pool",
+        "destination_status"
     )",
-                ""},
-    Plugin_data{
-        "metadata_cache",
-        "Metadata Cache, managing information fetched from the Metadata Server",
-        "0.0.1", R"(
+     ""},
+    {"metadata_cache",
+     "Metadata Cache, managing information fetched from the Metadata Server",
+     "0.0.1", R"(
         "logger",
         "router_protobuf"
     )",
-        ""},
-    Plugin_data{"keepalive", "Keepalive Plugin", "0.0.1", "", ""},
+     ""},
+    {"keepalive", "Keepalive Plugin", "0.0.1", "", ""},
 };
 
 INSTANTIATE_TEST_SUITE_P(CheckReadInfo, PluginInfoAppTestReadInfo,

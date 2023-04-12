@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,7 +29,9 @@
   macro not defined).
 */
 
+#include "util/require.h"
 #include <ndb_global.h>
+#include "portlib/ndb_compiler.h"
 
 #include "SimulatedBlock.hpp"
 #include <NdbOut.hpp>
@@ -126,8 +128,10 @@ SimulatedBlock::SimulatedBlock(BlockNumber blockNumber,
   clearTimes();
 #endif
 
-  for(GlobalSignalNumber i = 0; i<=MAX_GSN; i++)
-    theExecArray[i] = 0;
+  for(GlobalSignalNumber i = 0; i<=MAX_GSN; i++){
+    theSignalHandlerArray[i].m_execFunction = nullptr;
+    theSignalHandlerArray[i].m_signalScope = SignalScope::External;
+  }
 
   installSimulatedBlockFunctions();
 
@@ -161,7 +165,7 @@ SimulatedBlock::addInstance(SimulatedBlock* b, Uint32 theInstance)
 void
 SimulatedBlock::initCommon()
 {
-  NDB_STATIC_ASSERT(RG_COUNT == MM_RG_COUNT + 1);
+  static_assert(RG_COUNT == MM_RG_COUNT + 1);
 
   Uint32 count = 10;
   this->getParam("FragmentSendPool", &count);
@@ -216,50 +220,71 @@ SimulatedBlock::~SimulatedBlock()
 
 void 
 SimulatedBlock::installSimulatedBlockFunctions(){
-  ExecFunction * a = theExecArray;
-  a[GSN_NODE_STATE_REP] = &SimulatedBlock::execNODE_STATE_REP;
-  a[GSN_CHANGE_NODE_STATE_REQ] = &SimulatedBlock::execCHANGE_NODE_STATE_REQ;
-  a[GSN_NDB_TAMPER] = &SimulatedBlock::execNDB_TAMPER;
-  a[GSN_SIGNAL_DROPPED_REP] = &SimulatedBlock::execSIGNAL_DROPPED_REP;
-  a[GSN_CONTINUE_FRAGMENTED]= &SimulatedBlock::execCONTINUE_FRAGMENTED;
-  a[GSN_STOP_FOR_CRASH]= &SimulatedBlock::execSTOP_FOR_CRASH;
-  a[GSN_UTIL_CREATE_LOCK_REF]   = &SimulatedBlock::execUTIL_CREATE_LOCK_REF;
-  a[GSN_UTIL_CREATE_LOCK_CONF]  = &SimulatedBlock::execUTIL_CREATE_LOCK_CONF;
-  a[GSN_UTIL_DESTROY_LOCK_REF]  = &SimulatedBlock::execUTIL_DESTORY_LOCK_REF;
-  a[GSN_UTIL_DESTROY_LOCK_CONF] = &SimulatedBlock::execUTIL_DESTORY_LOCK_CONF;
-  a[GSN_UTIL_LOCK_REF]    = &SimulatedBlock::execUTIL_LOCK_REF;
-  a[GSN_UTIL_LOCK_CONF]   = &SimulatedBlock::execUTIL_LOCK_CONF;
-  a[GSN_UTIL_UNLOCK_REF]  = &SimulatedBlock::execUTIL_UNLOCK_REF;
-  a[GSN_UTIL_UNLOCK_CONF] = &SimulatedBlock::execUTIL_UNLOCK_CONF;
-  a[GSN_FSOPENREF]    = &SimulatedBlock::execFSOPENREF;
-  a[GSN_FSCLOSEREF]   = &SimulatedBlock::execFSCLOSEREF;
-  a[GSN_FSWRITEREF]   = &SimulatedBlock::execFSWRITEREF;
-  a[GSN_FSREADREF]    = &SimulatedBlock::execFSREADREF;
-  a[GSN_FSREMOVEREF]  = &SimulatedBlock::execFSREMOVEREF;
-  a[GSN_FSSYNCREF]    = &SimulatedBlock::execFSSYNCREF;
-  a[GSN_FSAPPENDREF]  = &SimulatedBlock::execFSAPPENDREF;
-  a[GSN_NODE_START_REP] = &SimulatedBlock::execNODE_START_REP;
-  a[GSN_API_START_REP] = &SimulatedBlock::execAPI_START_REP;
-  a[GSN_SEND_PACKED] = &SimulatedBlock::execSEND_PACKED;
-  a[GSN_CALLBACK_CONF] = &SimulatedBlock::execCALLBACK_CONF;
-  a[GSN_SYNC_THREAD_REQ] = &SimulatedBlock::execSYNC_THREAD_REQ;
-  a[GSN_SYNC_THREAD_CONF] = &SimulatedBlock::execSYNC_THREAD_CONF;
-  a[GSN_LOCAL_ROUTE_ORD] = &SimulatedBlock::execLOCAL_ROUTE_ORD;
-  a[GSN_SYNC_REQ] = &SimulatedBlock::execSYNC_REQ;
-  a[GSN_SYNC_PATH_REQ] = &SimulatedBlock::execSYNC_PATH_REQ;
-  a[GSN_SYNC_PATH_CONF] = &SimulatedBlock::execSYNC_PATH_CONF;
+  FunctionAndScope* a = theSignalHandlerArray;
+  a[GSN_NODE_STATE_REP].m_execFunction = &SimulatedBlock::execNODE_STATE_REP;
+  a[GSN_CHANGE_NODE_STATE_REQ].m_execFunction = &SimulatedBlock::execCHANGE_NODE_STATE_REQ;
+  a[GSN_NDB_TAMPER].m_execFunction = &SimulatedBlock::execNDB_TAMPER;
+  a[GSN_SIGNAL_DROPPED_REP].m_execFunction = &SimulatedBlock::execSIGNAL_DROPPED_REP;
+  a[GSN_CONTINUE_FRAGMENTED].m_execFunction = &SimulatedBlock::execCONTINUE_FRAGMENTED;
+  a[GSN_STOP_FOR_CRASH].m_execFunction = &SimulatedBlock::execSTOP_FOR_CRASH;
+  a[GSN_UTIL_CREATE_LOCK_REF].m_execFunction  = &SimulatedBlock::execUTIL_CREATE_LOCK_REF;
+  a[GSN_UTIL_CREATE_LOCK_CONF].m_execFunction = &SimulatedBlock::execUTIL_CREATE_LOCK_CONF;
+  a[GSN_UTIL_DESTROY_LOCK_REF].m_execFunction = &SimulatedBlock::execUTIL_DESTORY_LOCK_REF;
+  a[GSN_UTIL_DESTROY_LOCK_CONF].m_execFunction = &SimulatedBlock::execUTIL_DESTORY_LOCK_CONF;
+  a[GSN_UTIL_LOCK_REF].m_execFunction = &SimulatedBlock::execUTIL_LOCK_REF;
+  a[GSN_UTIL_LOCK_CONF].m_execFunction = &SimulatedBlock::execUTIL_LOCK_CONF;
+  a[GSN_UTIL_UNLOCK_REF].m_execFunction = &SimulatedBlock::execUTIL_UNLOCK_REF;
+  a[GSN_UTIL_UNLOCK_CONF].m_execFunction = &SimulatedBlock::execUTIL_UNLOCK_CONF;
+  a[GSN_FSOPENREF].m_execFunction = &SimulatedBlock::execFSOPENREF;
+  a[GSN_FSOPENREF].m_signalScope = SignalScope::Local;
+  a[GSN_FSCLOSEREF].m_execFunction = &SimulatedBlock::execFSCLOSEREF;
+  a[GSN_FSCLOSEREF].m_signalScope = SignalScope::Local;
+  a[GSN_FSWRITEREF].m_execFunction = &SimulatedBlock::execFSWRITEREF;
+  a[GSN_FSWRITEREF].m_signalScope = SignalScope::Local;
+  a[GSN_FSREADREF].m_execFunction = &SimulatedBlock::execFSREADREF;
+  a[GSN_FSREADREF].m_signalScope = SignalScope::Local;
+  a[GSN_FSREMOVEREF].m_execFunction = &SimulatedBlock::execFSREMOVEREF;
+  a[GSN_FSREMOVEREF].m_signalScope = SignalScope::Local;
+  a[GSN_FSSYNCREF].m_execFunction = &SimulatedBlock::execFSSYNCREF;
+  a[GSN_FSSYNCREF].m_signalScope = SignalScope::Local;
+  a[GSN_FSAPPENDREF].m_execFunction = &SimulatedBlock::execFSAPPENDREF;
+  a[GSN_FSAPPENDREF].m_signalScope = SignalScope::Local;
+  a[GSN_NODE_START_REP].m_execFunction = &SimulatedBlock::execNODE_START_REP;
+  a[GSN_API_START_REP].m_execFunction = &SimulatedBlock::execAPI_START_REP;
+  a[GSN_SEND_PACKED].m_execFunction = &SimulatedBlock::execSEND_PACKED;
+  a[GSN_CALLBACK_CONF].m_execFunction = &SimulatedBlock::execCALLBACK_CONF;
+  a[GSN_SYNC_THREAD_REQ].m_execFunction = &SimulatedBlock::execSYNC_THREAD_REQ;
+  a[GSN_SYNC_THREAD_CONF].m_execFunction = &SimulatedBlock::execSYNC_THREAD_CONF;
+  a[GSN_LOCAL_ROUTE_ORD].m_execFunction = &SimulatedBlock::execLOCAL_ROUTE_ORD;
+  a[GSN_SYNC_REQ].m_execFunction = &SimulatedBlock::execSYNC_REQ;
+  a[GSN_SYNC_PATH_REQ].m_execFunction = &SimulatedBlock::execSYNC_PATH_REQ;
+  a[GSN_SYNC_PATH_CONF].m_execFunction = &SimulatedBlock::execSYNC_PATH_CONF;
 }
 
 void
 SimulatedBlock::addRecSignalImpl(GlobalSignalNumber gsn, 
 				 ExecFunction f, bool force){
-  if(gsn > MAX_GSN || (!force &&  theExecArray[gsn] != 0)){
+  if(gsn > MAX_GSN ||
+     (!force &&  theSignalHandlerArray[gsn].m_execFunction != nullptr)){
     char errorMsg[255];
     BaseString::snprintf(errorMsg, 255, 
  	     "GSN %d(%d))", gsn, MAX_GSN); 
     ERROR_SET(fatal, NDBD_EXIT_ILLEGAL_SIGNAL, errorMsg, errorMsg);
   }
-  theExecArray[gsn] = f;
+  theSignalHandlerArray[gsn].m_execFunction = f;
+}
+
+void
+SimulatedBlock::addSignalScopeImpl(GlobalSignalNumber gsn,
+                                   SignalScope scope){
+  FunctionAndScope& fas = theSignalHandlerArray[gsn];
+
+  if (!(scope == SignalScope::Local || scope == SignalScope::Remote || scope == SignalScope::Management || scope == SignalScope::External)){
+    warningEvent("SimulatedBlock::addSignalScopeImpl, incorrect use, SignalScope out of range %u", scope);
+    require(false);
+  }
+  // If scope is defined multiple times we assume the most restrictive
+  fas.m_signalScope = MIN(fas.m_signalScope, scope);
 }
 
 void
@@ -449,7 +474,7 @@ SimulatedBlock::handle_send_failed(SendStatus ss,
                                "Out of SendBufferMemory in sendSignal", "");
     break;
   case SEND_MESSAGE_TOO_BIG:
-    /* If message is too big when sending CmvmiDummySignal log a convinient
+    /* If message is too big when sending CmvmiDummySignal log a convenient
      * message about it to.
      * Note that CmvmiDummySignal is not intended for production usage but for
      * use by test cases.
@@ -494,13 +519,13 @@ static void
 linkSegments(Uint32 head, Uint32 tail){
   
   Ptr<SectionSegment> headPtr;
-  g_sectionSegmentPool.getPtr(headPtr, head);
+  require(g_sectionSegmentPool.getPtr(headPtr, head));
   
   Ptr<SectionSegment> tailPtr;
-  g_sectionSegmentPool.getPtr(tailPtr, tail);
+  require(g_sectionSegmentPool.getPtr(tailPtr, tail));
   
   Ptr<SectionSegment> oldTailPtr;
-  g_sectionSegmentPool.getPtr(oldTailPtr, headPtr.p->m_lastSegment);
+  require(g_sectionSegmentPool.getPtr(oldTailPtr, headPtr.p->m_lastSegment));
   
   /* Can only efficiently link segments if linking to the end of a 
    * multiple-of-segment-size sized chunk
@@ -1904,7 +1929,7 @@ SimulatedBlock::sendSignalWithDelay(BlockReference ref,
   globalTimeQueue.insert(signal, delayInMilliSeconds);
 #endif
 
-  // befor 2nd parameter to globalTimeQueue.insert
+  // before 2nd parameter to globalTimeQueue.insert
   // (Priority)theSendSig[sigIndex].jobBuffer
 }
 
@@ -2160,26 +2185,42 @@ SimulatedBlock::freeBat(){
   }
 }
 
+/**
+ * Return pointer to a const NewVARIABLE object indexed by
+ * blockNo, instanceNo and varNo.
+ * Will return NULL if no such variable exists
+ */
 const NewVARIABLE *
-SimulatedBlock::getBat(Uint16 blockNo, Uint32 instanceNo){
+SimulatedBlock::getBatVar(Uint16 blockNo, Uint32 instanceNo, Uint32 varNo){
   assert(blockNo == blockToMain(blockNo));
+  /* Check blockNo in range */
+  if (unlikely(blockNo > MAX_BLOCK_NO ||
+               blockNo < MIN_BLOCK_NO))
+  {
+    assert(false);
+    return NULL;
+  }
   SimulatedBlock * sb = globalData.getBlock(blockNo);
-  if (sb != 0 && instanceNo != 0)
+  if (sb != NULL && instanceNo != 0)
+  {
+    /* Lookup instance within block type */
     sb = sb->getInstance(instanceNo);
-  if(sb == 0)
-    return 0;
-  return sb->NewVarRef;
-}
+  }
 
-Uint16
-SimulatedBlock::getBatSize(Uint16 blockNo, Uint32 instanceNo){
-  assert(blockNo == blockToMain(blockNo));
-  SimulatedBlock * sb = globalData.getBlock(blockNo);
-  if (sb != 0 && instanceNo != 0)
-    sb = sb->getInstance(instanceNo);
-  if(sb == 0)
-    return 0;
-  return sb->theBATSize;
+  /* Check block exists, Bat exists, Var exists */
+  if(unlikely(sb == NULL))
+  {
+    return NULL;
+  }
+  if (unlikely(sb->NewVarRef == NULL))
+  {
+    return NULL;
+  }
+  if (unlikely(varNo >= sb->theBATSize))
+  {
+    return NULL;
+  }
+  return &sb->NewVarRef[varNo];
 }
 
 void* SimulatedBlock::allocRecord(const char * type, size_t s, size_t n, bool clear, Uint32 paramId)
@@ -2290,6 +2331,30 @@ SimulatedBlock::allocChunks(AllocChunk dst[],
     m_ctx.m_mm.alloc_pages(rg, &dst[i].ptrI, &cnt, 1);
     if (unlikely(cnt == 0))
       goto fail;
+    // DBLQH error range since this function is only used there.
+    if (ERROR_INSERTED(5107))
+    {
+      /*
+       * Try chop up the allocation in chunks, with unused pages between the
+       * chunks.
+       *
+       * First allocation will typically succeed allocate all memory, we keep
+       * the last pages in the range.  Then the next allocation will also
+       * succeed to allocate all remaining pages (if there are enough page
+       * memory), we keep the last pages again, and there will be a gap between
+       * the chunks.  If there are too little page memory, allocation may
+       * succeed reusing the gaps and there might not be gaps between the
+       * chunks, if that happen try configure more page memory for test.
+       */
+      const Uint32 min_pages_per_chunk = pages / (arraysize - i) + 1;
+      if (cnt > min_pages_per_chunk)
+      {
+        const Uint32 gap_pages = cnt - min_pages_per_chunk;
+        m_ctx.m_mm.release_pages(rg, dst[i].ptrI, gap_pages);
+        dst[i].ptrI += gap_pages;
+        cnt -= gap_pages;
+      }
+    }
     pages -= cnt;
     dst[i].cnt = cnt;
   }
@@ -2672,11 +2737,49 @@ SimulatedBlock::handle_execute_error(GlobalSignalNumber gsn)
     BaseString::snprintf(errorMsg, 255, "Illegal signal received (GSN %d too high)", gsn);
     ERROR_SET(fatal, NDBD_EXIT_PRGERR, errorMsg, errorMsg);
   }
-  if (!(theExecArray[gsn] != 0)) {
+  if (!(theSignalHandlerArray[gsn].m_execFunction != nullptr)) {
     BaseString::snprintf(errorMsg, 255, "Illegal signal received (GSN %d not added)", gsn);
     ERROR_SET(fatal, NDBD_EXIT_PRGERR, errorMsg, errorMsg);
   }
   ndbabort();
+}
+
+ATTRIBUTE_NOINLINE
+void
+SimulatedBlock::handle_sender_error(GlobalSignalNumber gsn, Signal *signal, SignalScope scope)
+{
+  const BlockReference ref = (signal->senderBlockRef());
+  Uint32 nodeId = refToNode(ref);
+  char errorMsg[255];
+    switch (scope)
+    {
+    case SignalScope::Local:
+    {
+      CRASH_INSERTION(10054);
+      BaseString::snprintf(errorMsg, 255, "Illegal signal %s received for SignalScope::Local (GSN %d from node %d, block 0x%X to 0x%X)", getSignalName(gsn), gsn, nodeId, refToMain(ref), refToMain(reference()));
+      ERROR_SET(fatal, NDBD_EXIT_PRGERR, errorMsg, getBlockName(number()));
+      break;
+    }
+    case SignalScope::Remote:
+    {
+      BaseString::snprintf(errorMsg, 255, "Illegal signal %s received for SignalScope::Remote (GSN %d from node %d, block 0x%X to 0x%X)", getSignalName(gsn), gsn, nodeId, refToMain(ref), refToMain(reference()));
+      ERROR_SET(fatal, NDBD_EXIT_PRGERR, errorMsg, getBlockName(number()));
+      break;
+    }
+    case SignalScope::Management:
+    {
+      BaseString::snprintf(errorMsg, 255, "Illegal signal %s received for SignalScope::Management (GSN %d from API node %d, block 0x%X to 0x%X)", getSignalName(gsn), gsn, nodeId, refToMain(ref), refToMain(reference()));
+      ERROR_SET(fatal, NDBD_EXIT_PRGERR, errorMsg, getBlockName(number()));
+      break;
+    }
+    case SignalScope::External:
+      // Should not be reachable
+      ndbassert(false);
+      BaseString::snprintf(errorMsg, 255, "Illegal signal %s eceived for SignalScope::External (GSN %d from API node %d, block 0x%X to 0x%X)", getSignalName(gsn), gsn, nodeId, refToMain(ref), refToMain(reference()));
+      ERROR_SET(fatal, NDBD_EXIT_PRGERR, errorMsg, getBlockName(number()));
+      break;
+    }
+   ndbabort();
 }
 
 // MT LQH callback CONF via signal
@@ -3312,10 +3415,10 @@ SimulatedBlock::doNodeFailureCleanup(Signal* signal,
   sig->cleanup.resource = resource;
   sig->cleanup.cursor = cursor;
   sig->cleanup.elementsCleaned= elementsCleaned;
-  Uint32 callbackWords = (sizeof(Callback) + 3) >> 2;
-  Uint32 sigLen = ContinueFragmented::CONTINUE_CLEANUP_FIXED_WORDS + 
+  constexpr Uint32 callbackWords = (sizeof(Callback) + 3) >> 2;
+  constexpr Uint32 sigLen = ContinueFragmented::CONTINUE_CLEANUP_FIXED_WORDS +
     callbackWords;
-  ndbassert(sigLen <= 25); // Should be STATIC_ASSERT
+  static_assert(sigLen <= 25);
   memcpy(&sig->cleanup.callbackStart, &cb, callbackWords << 2);
   
   sendSignal(reference(), GSN_CONTINUE_FRAGMENTED, signal, sigLen, JBB);
@@ -3417,7 +3520,7 @@ SimulatedBlock::sendFirstFragment(FragmentSendInfo & info,
     totalSize += ptr[0].sz;
   }
 
-  if (totalSize + messageSize <= MAX_SIZE_SINGLE_SIGNAL)
+  if (totalSize + length <= MAX_SIZE_SINGLE_SIGNAL)
   {
     /**
      * Send signal directly
@@ -3430,7 +3533,8 @@ SimulatedBlock::sendFirstFragment(FragmentSendInfo & info,
     info.m_status = FragmentSendInfo::SendComplete;
     return true;
   }
-    
+  ndbrequire(blockToMain(rg.m_block) != V_QUERY);
+
   /**
    * Setup info object
    */
@@ -3778,7 +3882,7 @@ SimulatedBlock::sendFirstFragment(FragmentSendInfo & info,
     totalSize += ptr[0].sz;
   }
 
-  if (totalSize + messageSize <= MAX_SIZE_SINGLE_SIGNAL)
+  if (totalSize + length <= MAX_SIZE_SINGLE_SIGNAL)
   {
     /**
      * Send signal directly
@@ -3792,6 +3896,7 @@ SimulatedBlock::sendFirstFragment(FragmentSendInfo & info,
      */
     return true;
   }
+  ndbrequire(blockToMain(rg.m_block) != V_QUERY);
 
   /**
    * Setup info object
@@ -3862,7 +3967,7 @@ SimulatedBlock::sendNextLinearFragment(Signal* signal,
   
   enum { Unknown = 0, Full = 2 } loop = Unknown;
   for(; secNo >= 0 && secCount < 3; secNo--){
-    Uint32 * ptrP = info.m_sectionPtr[secNo].m_linear.p;
+    const Uint32* ptrP = info.m_sectionPtr[secNo].m_linear.p;
     if(ptrP == NULL)
       continue;
     
@@ -4576,7 +4681,7 @@ SimulatedBlock::cmp_attr(Uint32 attrDesc, const CHARSET_INFO* cs,
 {
   const Uint32 typeId = AttributeDescriptor::getType(attrDesc);
   NdbSqlUtil::Cmp *cmp = NdbSqlUtil::getType(typeId).m_cmp;
-  return (*cmp)(cs, s1, s1Len, s2, s1Len);
+  return (*cmp)(cs, s1, s1Len, s2, s2Len);
 }
 
 
@@ -4873,7 +4978,7 @@ SimulatedBlock::execLOCAL_ROUTE_ORD(Signal* signal)
     Uint32 gsn = ord->gsn;
     Uint32 prio = ord->prio;
     ndbrequire(dstcnt <= LocalRouteOrd::MaxDstCount);
-    NDB_STATIC_ASSERT(25 + LocalRouteOrd::MaxDstCount <= NDB_ARRAY_SIZE(signal->theData));
+    static_assert(25 + LocalRouteOrd::MaxDstCount <= NDB_ARRAY_SIZE(signal->theData));
     memcpy(signal->theData+25, ord->path, 4*dstcnt);
     SectionHandle handle(this, signal);
     if (sigLen > LocalRouteOrd::StaticLen + dstcnt)
@@ -5076,7 +5181,7 @@ SimulatedBlock::execSYNC_THREAD_CONF(Signal* signal)
 {
   jamEntry();
   Ptr<SyncThreadRecord> ptr;
-  c_syncThreadPool.getPtr(ptr, signal->theData[1]);
+  ndbrequire(c_syncThreadPool.getPtr(ptr, signal->theData[1]));
 
   ndbrequire(ptr.p->m_cnt > 0);
   ptr.p->m_cnt--;
@@ -5173,9 +5278,11 @@ SimulatedBlock::synchronize_path(Signal * signal,
 void
 SimulatedBlock::execSYNC_PATH_REQ(Signal* signal)
 {
+  LOCAL_SIGNAL(signal);
   jamEntry();
   SyncPathReq * req = CAST_PTR(SyncPathReq, signal->getDataPtrSend());
-  ndbrequire(req->pathlen <= SyncPathReq::MaxPathLen);
+  ndbrequire(req->pathlen >= 1 && req->pathlen <= SyncPathReq::MaxPathLen);
+  ndbrequire(signal->getLength() >= SyncPathReq::SignalLength + req->pathlen);
   if (req->pathlen == 1)
   {
     jam();
@@ -5205,7 +5312,7 @@ SimulatedBlock::execSYNC_PATH_CONF(Signal* signal)
   SyncPathConf conf = * CAST_CONSTPTR(SyncPathConf, signal->getDataPtr());
   Ptr<SyncThreadRecord> ptr;
 
-  c_syncThreadPool.getPtr(ptr, conf.senderData);
+  ndbrequire(c_syncThreadPool.getPtr(ptr, conf.senderData));
 
   if (ptr.p->m_cnt == 0)
   {
@@ -5234,7 +5341,7 @@ SimulatedBlock::checkNodeFailSequence(Signal* signal)
   /**
    * Make sure that a signal being part of node-failure handling
    *   from a remote node, does not get to us before we got the NODE_FAILREP
-   *   (this to avoid tricky state handling to some extent when receving
+   *   (this to avoid tricky state handling to some extent when receiving
    *    signals from old nodes)
    *
    * To ensure this, we send the signal via the transporter for the remote
@@ -5802,7 +5909,7 @@ SimulatedBlock::get_load_indicators(DistributionHandler * const handle,
  * The selection is based on load levels. We use two levels of loads
  * to impact this decision. We use a long-term scheduling based on
  * the CPU load the last 100 milliseconds. Thus we change the
- * scheduling 10 times per second to accomodate the load of the various
+ * scheduling 10 times per second to accommodate the load of the various
  * threads. This means that e.g. if a certain LDM thread is very busy
  * with write actions and other things it will get a lower risk of being
  * selected here in the next scheduling decision.

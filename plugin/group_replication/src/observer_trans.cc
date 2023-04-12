@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2013, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -38,9 +38,10 @@
 #include "plugin/group_replication/include/plugin_messages/transaction_message.h"
 #include "plugin/group_replication/include/plugin_messages/transaction_with_guarantee_message.h"
 #include "plugin/group_replication/include/plugin_observers/group_transaction_observation_manager.h"
+
+#ifndef NDEBUG
 #include "plugin/group_replication/include/sql_service/sql_command_test.h"
-#include "plugin/group_replication/include/sql_service/sql_service_command.h"
-#include "plugin/group_replication/include/sql_service/sql_service_interface.h"
+#endif
 
 /*
   Buffer to read the write_set value as a string.
@@ -67,11 +68,12 @@ int add_write_set(Transaction_context_log_event *tcle,
     uint64 const tmp_str_sz =
         base64_needed_encoded_length((uint64)BUFFER_READ_PKE);
     char *write_set_value =
-        (char *)my_malloc(PSI_NOT_INSTRUMENTED, tmp_str_sz, MYF(MY_WME));
+        (char *)my_malloc(key_write_set_encoded, tmp_str_sz, MYF(MY_WME));
     if (!write_set_value) {
       /* purecov: begin inspected */
       LogPluginErr(ERROR_LEVEL,
                    ER_GRP_RPL_OOM_FAILED_TO_GENERATE_IDENTIFICATION_HASH);
+      my_free(write_set_value);
       return 1;
       /* purecov: end */
     }
@@ -80,6 +82,7 @@ int add_write_set(Transaction_context_log_event *tcle,
       /* purecov: begin inspected */
       LogPluginErr(ERROR_LEVEL,
                    ER_GRP_RPL_WRITE_IDENT_HASH_BASE64_ENCODING_FAILED);
+      my_free(write_set_value);
       return 1;
       /* purecov: end */
     }
@@ -173,7 +176,9 @@ int group_replication_trans_before_commit(Trans_param *param) {
                   return 1;);
 
   DBUG_EXECUTE_IF("group_replication_before_commit_hook_wait", {
-    const char act[] = "now wait_for continue_commit";
+    const char act[] =
+        "now signal signal.group_replication_before_commit_hook_wait_reached "
+        "wait_for continue_commit";
     assert(!debug_sync_set_action(current_thd, STRING_WITH_LEN(act)));
   });
 
@@ -231,7 +236,7 @@ int group_replication_trans_before_commit(Trans_param *param) {
   }
 
   if (shared_plugin_stop_lock->try_grab_read_lock()) {
-    /* If plugin is stopping, rollback the transaction immediatly. */
+    /* If plugin is stopping, rollback the transaction immediately. */
     return 1;
   }
 
@@ -301,7 +306,7 @@ int group_replication_trans_before_commit(Trans_param *param) {
   /*
     Atomic DDL:s are logged through the transactional cache so they should
     be exempted from considering as DML by the plugin: not
-    everthing that is in the trans cache is actually DML.
+    everything that is in the trans cache is actually DML.
   */
   bool is_dml = !param->is_atomic_ddl;
   bool may_have_sbr_stmts = !is_dml;
@@ -385,6 +390,13 @@ int group_replication_trans_before_commit(Trans_param *param) {
       */
       may_have_sbr_stmts = true;
     }
+
+    DBUG_EXECUTE_IF("group_replication_after_add_write_set", {
+      const char act[] =
+          "now signal signal.group_replication_after_add_write_set_reached "
+          "wait_for signal.group_replication_after_add_write_set_continue";
+      assert(!debug_sync_set_action(current_thd, STRING_WITH_LEN(act)));
+    });
 
     /*
       'CREATE TABLE ... AS SELECT' is considered a DML, though in reality it
@@ -519,7 +531,9 @@ int group_replication_trans_before_commit(Trans_param *param) {
   };);
 
   DBUG_EXECUTE_IF("group_replication_before_message_broadcast", {
-    const char act[] = "now wait_for waiting";
+    const char act[] =
+        "now signal signal.group_replication_before_message_broadcast_reached "
+        "wait_for waiting";
     assert(!debug_sync_set_action(current_thd, STRING_WITH_LEN(act)));
   });
 #endif
@@ -581,7 +595,9 @@ err:
   }
 
   DBUG_EXECUTE_IF("group_replication_after_before_commit_hook", {
-    const char act[] = "now wait_for signal.commit_continue";
+    const char act[] =
+        "now SIGNAL signal.group_replication_after_before_commit_hook_reached "
+        "WAIT_FOR signal.group_replication_after_before_commit_hook_continue";
     assert(!debug_sync_set_action(current_thd, STRING_WITH_LEN(act)));
   });
   return error;

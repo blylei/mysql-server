@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -213,8 +213,8 @@ bool Clone_persist_gtid::check_gtid_prepare(THD *thd, trx_t *trx,
   }
   /* Skip GTID if External XA transaction is not in IDLE state. */
   if (!xid_state->has_state(XID_STATE::XA_IDLE)) {
-    ut_ad(false);
-    return (false);
+    ut_d(ut_error);
+    ut_o(return (false));
   }
   /* Skip if SE is not set to persist GTID.*/
   if (!thd->se_persists_gtid()) {
@@ -341,8 +341,8 @@ void Clone_persist_gtid::get_gtid_info(trx_t *trx, Gtid_desc &gtid_desc) {
   auto thd = trx->mysql_thd;
 
   if (!has_gtid(trx, thd, thd_check)) {
-    ut_ad(false);
-    return;
+    ut_d(ut_error);
+    ut_o(return );
   }
 
   gtid_desc.m_version = GTID_VERSION;
@@ -480,6 +480,8 @@ void Clone_persist_gtid::flush_gtids(THD *thd) {
   Sid_map sid_map(nullptr);
   Gtid_set table_gtid_set(&sid_map, nullptr);
 
+  DBUG_EXECUTE_IF("gtid_persist_flush_disable", return;);
+
   /* During recovery, fetch existing GTIDs from gtid_executed table. */
   bool is_recovery = !m_thread_active.load();
   if (is_recovery && !opt_initialize) {
@@ -526,7 +528,7 @@ void Clone_persist_gtid::flush_gtids(THD *thd) {
     my_free(gtid_buffer);
   }
 
-  /* Update trx number upto which GTID is written to table. */
+  /* Update trx number up to which GTID is written to table. */
   update_gtid_trx_no(oldest_trx_no);
 
   /* Request Compression once the counter reaches threshold. */
@@ -635,7 +637,7 @@ bool Clone_persist_gtid::wait_thread(bool start, bool wait_flush,
         result = false;
         return (0);
       }
-      /* If it is flushed upto the point requested. */
+      /* If it is flushed up to the point requested. */
       if (check_flushed(flush_number)) {
         /* Check if compression is done if requested. */
         if (!compress || !m_explicit_request.load()) {
@@ -686,7 +688,7 @@ bool Clone_persist_gtid::wait_thread(bool start, bool wait_flush,
 }
 
 /** Persist GTID to on disk table from time to time.
-@param[in,out]	persist_gtid	GTID persister */
+@param[in,out]  persist_gtid    GTID persister */
 static void clone_gtid_thread(Clone_persist_gtid *persist_gtid) {
   persist_gtid->periodic_write();
 }
@@ -703,8 +705,8 @@ bool Clone_persist_gtid::start() {
 
   if (!wait_thread(true, false, 0, false, false, nullptr)) {
     ib::error(ER_IB_CLONE_TIMEOUT) << "Wait for GTID thread to start timed out";
-    ut_ad(false);
-    return (false);
+    ut_d(ut_error);
+    ut_o(return (false));
   }
   m_active.store(true);
   return (true);
@@ -715,7 +717,7 @@ void Clone_persist_gtid::stop() {
   if (m_thread_active.load() &&
       !wait_thread(false, false, 0, false, false, nullptr)) {
     ib::error(ER_IB_CLONE_TIMEOUT) << "Wait for GTID thread to stop timed out";
-    ut_ad(false);
+    ut_d(ut_error);
   }
 }
 
@@ -742,6 +744,6 @@ void Clone_persist_gtid::wait_flush(bool compress_gtid, bool early_timeout,
   /* No error for early timeout. */
   if (!success && !early_timeout) {
     ib::error(ER_IB_CLONE_TIMEOUT) << "Wait for GTID thread to flush timed out";
-    ut_ad(false);
+    ut_d(ut_error);
   }
 }

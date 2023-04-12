@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include <cstring>
 #include <NDBT.hpp>
 #include <NDBT_Test.hpp>
@@ -928,7 +929,7 @@ int runCloseWithoutStop(NDBT_Context* ctx, NDBT_Step* step){
   int records = ctx->getNumRecords();
   int numFailed = 0;
   ScanFunctions scanF(*pTab);
-  // Iterate over all possible parallelism valuse
+  // Iterate over all possible parallelism values
   for (int p = 1; p<240; p++){
     g_info << p << " CloseWithoutStop openScan" << endl;
     if (scanF.scanReadFunctions(GETNDB(step), 
@@ -2219,7 +2220,7 @@ runExtraNextResult(NDBT_Context* ctx, NDBT_Step* step)
             << ndb->getNdbError() << " in the " << i << "th iteration." <<endl;
     }
     
-    // Do a random numer of scans in this transaction.
+    // Do a random number of scans in this transaction.
     const int scanCount = rand()%4;
     for (int j=0; j < scanCount; j++)
     {
@@ -2510,7 +2511,7 @@ runScanDuringShrinkAndExpandBack(NDBT_Context* ctx, NDBT_Step* step)
  * 1. Start with table with just above 2^n buckets in fragment 0.
  * 2. Start scan and read about half of the rows in fragment 0.
  * 3. Expand table, due to 1) the scanned buckets in bottom of table are
- *    splitted to top buckets.  And since scan is at about middle of the
+ *    split to top buckets.  And since scan is at about middle of the
  *    table it will not hinder expansion.
  * 4. Shrink table back to original size.  The scanned top buckets will now
  *    be merged back to bottom of table.  But before bug fix top buckets was

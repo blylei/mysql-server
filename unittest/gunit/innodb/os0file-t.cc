@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2020, Oracle and/or its affiliates.
+Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -128,8 +128,6 @@ class os0file_t : public ::testing::Test {
   pfs_os_file_t test_file;
   static constexpr char TEST_FILE_NAME[] = "os0file-t-temp.txt";
 };
-
-constexpr char os0file_t::TEST_FILE_NAME[];
 
 TEST_F(os0file_t, hundred_10_byte_writes_reads_flushes_with_fsync) {
   srv_use_fdatasync = false;

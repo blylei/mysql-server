@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -59,7 +59,7 @@ namespace net {
 namespace ip {
 
 /**
- * convert an integer from host-endianess into network endianess.
+ * convert an integer from host-endianness into network endianness.
  *
  * constexpr version of htons()/htonl()
  */
@@ -72,7 +72,7 @@ constexpr T host_to_network(const T t) noexcept {
 }
 
 /**
- * convert an integer from network-endianess into host endianess.
+ * convert an integer from network-endianness into host endianness.
  *
  * constexpr version of ntohs()/ntohl()
  */
@@ -824,7 +824,7 @@ std::basic_ostream<CharT, Traits> &operator<<(
   return os;
 }
 
-// 21.13.3 basic_endpoint comparision
+// 21.13.3 basic_endpoint comparison
 
 template <class InternetProtocol>
 constexpr bool operator==(const basic_endpoint<InternetProtocol> &a,
@@ -983,7 +983,7 @@ class network_v4 {
       t >>= 1U;
     }
 
-    // TODO(jkneschk): check the remainer is all zero
+    // TODO(jkneschk): check the remainder is all zero
 
     prefix_len_ = sh;
   }
@@ -1216,7 +1216,7 @@ class tcp {
   using maxrt = socket_option::integer<IPPROTO_TCP, TCP_MAXRT>;
 #endif
 #ifdef TCP_MAXSEG
-  // linux, freebsd, solaris, maxosx
+  // linux, freebsd, solaris, macosx
   using maxseg = socket_option::integer<IPPROTO_TCP, TCP_MAXSEG>;
 #endif
 #ifdef TCP_MD5SIG

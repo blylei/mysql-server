@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -91,7 +91,7 @@ TransporterRegistry::dump_and_report_bad_message(const char file[], unsigned lin
     size_t reserve;
     if (!nextMsgOffset)
     {
-      // If next message wont be dumped, print as much as possible
+      // If next message won't be dumped, print as much as possible
       // from start of buffer.
       reserve = 0;
     }
@@ -488,7 +488,7 @@ importGeneric(Uint32 * & insertPtr, const GenericSectionPtr & ptr){
     const Uint32* next= ptr.sectionIter->getNextWords(len);
 
     assert(len <= remain);
-    assert(next != NULL);
+    assert(next != nullptr);
 
     memcpy(insertPtr, next, 4 * len);
     insertPtr+= len;
@@ -498,7 +498,7 @@ importGeneric(Uint32 * & insertPtr, const GenericSectionPtr & ptr){
   /* Check that there were no more words available from the
    * Signal iterator
    */
-  assert(ptr.sectionIter->getNextWords(remain) == NULL);
+  assert(ptr.sectionIter->getNextWords(remain) == nullptr);
 }
 
 void copy(Uint32 * & insertPtr, 

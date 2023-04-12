@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -209,7 +209,7 @@ class ConfigGenerator {
                        const std::string &bootstrap_socket);
 
   /**
-   * init() calls this to connect to metadata server; sets mysql_ (conection)
+   * init() calls this to connect to metadata server; sets mysql_ (connection)
    * object.
    *
    * @param u parsed server URL (--bootstrap|-B argument)
@@ -386,7 +386,8 @@ class ConfigGenerator {
 
   /** @brief Creates Router account (low-level function)
    *
-   * Creates Router accout using CREATE USER [IF NOT EXISTS] ang give it GRANTs.
+   * Creates Router account using CREATE USER [IF NOT EXISTS] and gives it
+   * GRANTs.
    *
    * @param username Router account to be created - the username part
    * @param hostnames Router accounts to be created - the hostnames part

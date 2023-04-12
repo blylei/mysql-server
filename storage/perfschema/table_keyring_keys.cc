@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2008, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -145,16 +145,17 @@ int table_keyring_keys::read_row_values(TABLE *table, unsigned char *buf,
     if (read_all || bitmap_is_set(table->read_set, f->field_index())) {
       switch (f->field_index()) {
         case FO_KEY_ID:
-          set_field_varchar_utf8(f, m_row->m_key_id.c_str(),
-                                 static_cast<uint>(m_row->m_key_id.length()));
+          set_field_varchar_utf8mb4(
+              f, m_row->m_key_id.c_str(),
+              static_cast<uint>(m_row->m_key_id.length()));
           break;
         case FO_KEY_OWNER:
-          set_field_varchar_utf8(
+          set_field_varchar_utf8mb4(
               f, m_row->m_key_owner.c_str(),
               static_cast<uint>(m_row->m_key_owner.length()));
           break;
         case FO_BACKEND_KEY_ID:
-          set_field_varchar_utf8(
+          set_field_varchar_utf8mb4(
               f, m_row->m_backend_key_id.c_str(),
               static_cast<uint>(m_row->m_backend_key_id.length()));
           break;

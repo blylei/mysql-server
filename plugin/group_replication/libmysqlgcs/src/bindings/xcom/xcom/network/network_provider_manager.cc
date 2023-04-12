@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -59,7 +59,7 @@ bool Network_provider_manager::finalize() {
   this->cleanup_secure_connections_context();
   this->finalize_secure_connections_context();
 
-  // Remove the defaul provider, which is XCom
+  // Remove the default provider, which is XCom
   this->remove_network_provider(XCOM_PROTOCOL);
 
   return false;

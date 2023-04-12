@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -28,6 +28,7 @@
 #include <NdbAutoPtr.hpp>
 #include <util/NdbOut.hpp>
 #include <NdbTCP.h>
+#include "util/cstrbuf.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -60,7 +61,7 @@ LocalConfig::init(const char *connectString,
   _ownNodeId= 0;
 
   //1. Check connectString
-  if(connectString != 0 && connectString[0] != 0){
+  if(connectString != nullptr && connectString[0] != 0){
     if(readConnectString(connectString, "connect string")){
       if (ids.size())
 	return true;
@@ -125,13 +126,16 @@ LocalConfig::init(const char *connectString,
 LocalConfig::~LocalConfig(){
 }
   
-void LocalConfig::setError(int lineNumber, const char * _msg) {
+void LocalConfig::setError(int lineNumber, const char * _msg)
+{
   error_line = lineNumber;
-  snprintf(error_msg, sizeof(error_msg), "%s", _msg);
+  if (cstrbuf_copy(error_msg, _msg) == 1)
+  {
+    // ignore truncated error message
+  }
 }
 
-bool
-LocalConfig::parseNodeId(const char * buf [[maybe_unused]], const char * value)
+bool LocalConfig::parseNodeId(const char *value)
 {
   if (_ownNodeId != 0)
     return false; // already set
@@ -145,9 +149,7 @@ LocalConfig::parseNodeId(const char * buf [[maybe_unused]], const char * value)
   return true;
 }
 
-bool
-LocalConfig::parseHostName(const char * buf,
-                           const char * value)
+bool LocalConfig::parseHostName(const char *value)
 {
   char host[NDB_DNS_HOST_NAME_LENGTH + 1];
   char serv[NDB_IANA_SERVICE_NAME_LENGTH + 1];
@@ -185,9 +187,7 @@ LocalConfig::parseHostName(const char * buf,
   return true;
 }
 
-bool
-LocalConfig::parseBindAddress(const char * buf [[maybe_unused]],
-                              const char * value)
+bool LocalConfig::parseBindAddress(const char *value)
 {
   char host[NDB_DNS_HOST_NAME_LENGTH + 1];
   char serv[NDB_IANA_SERVICE_NAME_LENGTH + 1];
@@ -223,9 +223,7 @@ LocalConfig::parseBindAddress(const char * buf [[maybe_unused]],
   return true;
 }
 
-bool
-LocalConfig::parseFileName(const char * buf [[maybe_unused]],
-                           const char * value)
+bool LocalConfig::parseFileName(const char *value)
 {
   MgmtSrvrId mgmtSrvrId;
   mgmtSrvrId.type = MgmId_File;
@@ -234,9 +232,7 @@ LocalConfig::parseFileName(const char * buf [[maybe_unused]],
   return true;
 }
 
-bool
-LocalConfig::parseComment(const char * buf [[maybe_unused]],
-                          const char * value [[maybe_unused]])
+bool LocalConfig::parseComment(const char * /*value*/)
 {
   /* ignore */
   return true;
@@ -247,7 +243,7 @@ const LocalConfig::param_prefix LocalConfig::param_prefixes[] =
   // Documented prefix
   {"nodeid=", &LocalConfig::parseNodeId},
   {"bind-address=", &LocalConfig::parseBindAddress},
-  // Prefix generated and occuring in some public examples
+  // Prefix generated and occurring in some public examples
   {"host=", &LocalConfig::parseHostName},
   // Undocumented prefix
   {"OwnProcessId ", &LocalConfig::parseNodeId},
@@ -271,8 +267,8 @@ LocalConfig::parseString(const char * connectString, BaseString &err)
   bind_address_port = 0;
   bind_address.assign("");
 
-  for (char *tok = my_strtok_r(copy,";,",&for_strtok); tok != 0;
-       tok = my_strtok_r(NULL, ";,", &for_strtok))
+  for (char *tok = my_strtok_r(copy,";,",&for_strtok); tok != nullptr;
+       tok = my_strtok_r(nullptr, ";,", &for_strtok))
   {
     bool ok = false;
     for (size_t i = 0; i < std::size(param_prefixes); i++)
@@ -283,7 +279,7 @@ LocalConfig::parseString(const char * connectString, BaseString &err)
                   param_prefixes[i].prefix_len) == 0)
       {
         const char * value = tok + param_prefixes[i].prefix_len;
-        ok = (this->*param_prefixes[i].param_func)(tok, value);
+        ok = (this->*param_prefixes[i].param_func)(value);
         break;
       }
     }
@@ -302,7 +298,7 @@ bool LocalConfig::readFile(const char * filename, bool &fopenError)
   fopenError = false;
   
   FILE * file = fopen(filename, "r");
-  if(file == 0){
+  if(file == nullptr){
     BaseString::snprintf(line, sizeof(line),
 	     "Unable to open local config file: %s", filename);
     setError(0, line);

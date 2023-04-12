@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,10 +22,11 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include "Cmvmi.hpp"
 
 #include <cstring>
-
+#include <signal.h>
 #include <Configuration.hpp>
 #include <kernel_types.h>
 #include <NdbOut.hpp>
@@ -73,6 +74,10 @@
 
 extern int simulate_error_during_shutdown;
 
+#ifdef ERROR_INSERT
+extern int simulate_error_during_error_reporting;
+#endif
+
 // Index pages used by ACC instances
 Uint32 g_acc_pages_used[1 + MAX_NDBMT_LQH_WORKERS];
 
@@ -96,8 +101,8 @@ Cmvmi::Cmvmi(Block_context& ctx) :
   /* Ensure that aligned allocation will result in 64-bit
    * aligned offset for theData
    */
-  STATIC_ASSERT((sizeof(SectionSegment) % 8) == 0);
-  STATIC_ASSERT((offsetof(SectionSegment, theData) % 8) == 0); 
+  static_assert((sizeof(SectionSegment) % 8) == 0);
+  static_assert((offsetof(SectionSegment, theData) % 8) == 0); 
 
   long_sig_buffer_size= long_sig_buffer_size / sizeof(SectionSegment);
   g_sectionSegmentPool.setSize(long_sig_buffer_size,
@@ -224,8 +229,17 @@ void Cmvmi::execNDB_TAMPER(Signal* signal)
 
   if(ERROR_INSERTED(9006)){
     g_eventLogger->info("Activating error 9006 for SEGV of all nodes");
-    int *invalid_ptr = (int*) 123;
-    printf("%u", *invalid_ptr); // SEGV
+    /*
+     * Disable this injected crash to generate core files. We can not use the
+     * CRASH_INSERTION macro here since it modifies the node start type in an
+     * unwanted way when testing fix for Bug #24945638 STOPONERROR = 0 WITH
+     * UNCONTROLLED EXIT RESTARTS IN SAME WAY AS PREVIOUS RESTART.
+     * Instead we explicitly turn off core file generation by directly
+     * modifying the opt_core variable of main.cpp.
+     */
+    extern bool opt_core;
+    opt_core = false;
+    raise(SIGSEGV);
   }
 #endif
 
@@ -306,7 +320,7 @@ Cmvmi::execSYNC_CONF(Signal* signal)
   SyncConf conf = * CAST_CONSTPTR(SyncConf, signal->getDataPtr());
 
   Ptr<SyncRecord> ptr;
-  c_syncReqPool.getPtr(ptr, conf.senderData);
+  ndbrequire(c_syncReqPool.getPtr(ptr, conf.senderData));
   ndbrequire(ptr.p->m_cnt > 0);
   ptr.p->m_cnt--;
   if (ptr.p->m_cnt == 0)
@@ -325,7 +339,7 @@ Cmvmi::execSYNC_REF(Signal* signal)
   SyncRef ref = * CAST_CONSTPTR(SyncRef, signal->getDataPtr());
 
   Ptr<SyncRecord> ptr;
-  c_syncReqPool.getPtr(ptr, ref.senderData);
+  ndbrequire(c_syncReqPool.getPtr(ptr, ref.senderData));
   ndbrequire(ptr.p->m_cnt > 0);
   ptr.p->m_cnt--;
 
@@ -472,7 +486,7 @@ SavedEventBuffer::purge()
    * end of buffer.
    */
   constexpr Uint32 len_off = 0;
-  static_assert(offsetof(SavedEvent, m_len) == len_off * sizeof(Uint32), "");
+  static_assert(offsetof(SavedEvent, m_len) == len_off * sizeof(Uint32));
   const Uint32 data_len = ptr[len_off];
   Uint32 len = SavedEvent::HeaderLength + data_len;
   m_read_pos = (m_read_pos + len) % m_buffer_len;
@@ -531,7 +545,7 @@ SavedEventBuffer::scan(SavedEvent* _dst, Uint32 filter[])
    * end of buffer.
    */
   constexpr Uint32 len_off = 0;
-  static_assert(offsetof(SavedEvent, m_len) == len_off * sizeof(Uint32), "");
+  static_assert(offsetof(SavedEvent, m_len) == len_off * sizeof(Uint32));
   const Uint32 data_len = ptr[len_off];
   require(data_len <= MAX_EVENT_REP_SIZE_WORDS);
   Uint32 total = data_len + SavedEvent::HeaderLength;
@@ -564,7 +578,7 @@ SavedEventBuffer::getScanPosSeq() const
    * One can not safely cast ptr to SavedEvent pointer since it may wrap if at
    * end of buffer.
    */
-  static_assert(offsetof(SavedEvent, m_seq) % sizeof(Uint32) == 0, "");
+  static_assert(offsetof(SavedEvent, m_seq) % sizeof(Uint32) == 0);
   constexpr Uint32 seq_off = offsetof(SavedEvent, m_seq) / sizeof(Uint32);
   if (m_scan_pos + seq_off < m_buffer_len)
   {
@@ -609,7 +623,7 @@ void Cmvmi::execEVENT_REP(Signal* signal)
   if (num_sections > 0)
   {
     ndbrequire(num_sections == 1);
-    handle.getSection(segptr, 0);
+    ndbrequire(handle.getSection(segptr, 0));
   }
   /**
    * If entry is not found
@@ -921,7 +935,7 @@ Cmvmi::init_global_page_pool()
     for (Uint32 i = 0; i<cnt; i++)
     {
       Ptr<GlobalPage> pagePtr;
-      m_shared_page_pool.getPtr(pagePtr, ptrI + i);
+      ndbrequire(m_shared_page_pool.getPtr(pagePtr, ptrI + i));
       m_global_page_pool.release(pagePtr);
     }
     rl.m_max -= cnt;
@@ -1434,7 +1448,7 @@ void Cmvmi::execTAMPER_ORD(Signal* signal)
     /*--------------------------------------------------------------------*/
 
     /**
-     * since CMVMI doesnt keep track of master,
+     * since CMVMI doesn't keep track of master,
      * send to local DIH
      */
     signal->theData[0] = 5;
@@ -1448,7 +1462,7 @@ void Cmvmi::execTAMPER_ORD(Signal* signal)
     jam();
 
     /**
-     * since CMVMI doesnt keep track of master,
+     * since CMVMI doesn't keep track of master,
      * send to local DIH
      */
     signal->theData[0] = 5;
@@ -1618,7 +1632,7 @@ Cmvmi::execDUMP_STATE_ORD(Signal* signal)
           SegmentedSectionPtr ptr[3];
           for (Uint32 i = 0; i < num_secs; i++)
           {
-              handle.getSection(ptr[i], i);
+              ndbrequire(handle.getSection(ptr[i], i));
           }
           char msg[24*4];
           snprintf(msg,
@@ -1854,7 +1868,7 @@ Cmvmi::execDUMP_STATE_ORD(Signal* signal)
     {
       /**
        * If memory decreased more than once...
-       *   it must also increase atleast once
+       *   it must also increase at least once
        */
       ndbrequire(cnt_inc > 0);
     }
@@ -2264,6 +2278,37 @@ Cmvmi::execDUMP_STATE_ORD(Signal* signal)
     return;
   }
 
+  if (arg == DumpStateOrd::CmvmiSetWatchdogInterval)
+  {
+    Uint32 val = 6000;
+    const ndb_mgm_configuration_iterator * p =
+      m_ctx.m_config.getOwnConfigIterator();
+    ndb_mgm_get_int_parameter(p, CFG_DB_WATCHDOG_INTERVAL,
+                              &val);
+
+    if (signal->length() >= 2)
+    {
+      val = signal->theData[1];
+    }
+    g_eventLogger->info("Cmvmi : Setting watchdog interval to %u",
+                        val);
+    update_watch_dog_timer(val);
+  }
+
+#ifdef ERROR_INSERT
+  if (arg == DumpStateOrd::CmvmiSetErrorHandlingError)
+  {
+    Uint32 val = 0;
+    if (signal->length() >= 2)
+    {
+      val = signal->theData[1];
+    }
+    g_eventLogger->info("Cmvmi : Setting ErrorHandlingError to %u",
+                        val);
+    simulate_error_during_error_reporting = val;
+  }
+#endif
+
 #ifdef ERROR_INSERT
   if (arg == 9004 && signal->getLength() == 2)
   {
@@ -2373,12 +2418,16 @@ Cmvmi::execDUMP_STATE_ORD(Signal* signal)
     openReq->fileNumber[0] = ~Uint32(0);
     openReq->fileNumber[1] = ~Uint32(0);
     openReq->fileNumber[2] = 0;
-    openReq->fileNumber[3] =
-      1 << 24 |
-      1 << 16 |
-      255 << 8 |
-      255;
-    openReq->fileFlags = FsOpenReq::OM_READWRITE | FsOpenReq::OM_CREATE;
+    openReq->fileNumber[3] = ~Uint32(0);
+    FsOpenReq::setVersion(openReq->fileNumber, 1);
+    FsOpenReq::setSuffix(openReq->fileNumber, FsOpenReq::S_FRAGLOG);
+    openReq->fileFlags = FsOpenReq::OM_WRITEONLY | FsOpenReq::OM_CREATE |
+                         FsOpenReq::OM_TRUNCATE | FsOpenReq::OM_ZEROS_ARE_SPARSE;
+
+    openReq->page_size = 0;
+    openReq->file_size_hi = UINT32_MAX;
+    openReq->file_size_lo = UINT32_MAX;
+    openReq->auto_sync_size = 0;
 
     for (Uint32 i=0; i < numFiles; i++)
     {
@@ -2575,7 +2624,9 @@ void Cmvmi::execDBINFO_SCANREQ(Signal *signal)
 
     static const size_t num_config_params =
       sizeof(pools[0].config_params)/sizeof(pools[0].config_params[0]);
+    const Uint32 numPools = NDB_ARRAY_SIZE(pools);
     Uint32 pool = cursor->data[0];
+    ndbrequire(pool < numPools);
     BlockNumber bn = blockToMain(number());
     while(pools[pool].poolname)
     {
@@ -3149,7 +3200,7 @@ Cmvmi::execTESTSIG(Signal* signal){
     for(i = 0; i<handle.m_cnt; i++){
       SegmentedSectionPtr ptr(0,0,0);
       ndbout_c("-- Section %d --", i);
-      handle.getSection(ptr, i);
+      ndbrequire(handle.getSection(ptr, i));
       ndbrequire(ptr.p != 0);
       print(ptr, stdout);
       ndbrequire(ptr.sz == secSizes[i]);
@@ -3161,7 +3212,7 @@ Cmvmi::execTESTSIG(Signal* signal){
    */
   for(i = 0; i<handle.m_cnt; i++){
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, i);
+    ndbrequire(handle.getSection(ptr, i));
     ndbrequire(ptr.p != 0);
     ndbrequire(ptr.sz == secSizes[i]);
   }
@@ -3251,17 +3302,18 @@ Cmvmi::execTESTSIG(Signal* signal){
     const Uint32 secs = handle.m_cnt;
     for(i = 0; i<secs; i++){
       SegmentedSectionPtr sptr(0,0,0);
-      handle.getSection(sptr, i);
+      ndbrequire(handle.getSection(sptr, i));
+      Uint32* p = new Uint32[sptr.sz];
+      copy(p, sptr);
+      ptr[i].p = p;
       ptr[i].sz = sptr.sz;
-      ptr[i].p = new Uint32[sptr.sz];
-      copy(ptr[i].p, sptr);
     }
     
     if(testType == 3){
       /* Unicast linear sections to self */
       sendSignal(ref, GSN_TESTSIG, signal, signal->length(), JBB, ptr, secs);
     } else {
-      /* Boradcast linear sections to all nodes */
+      /* Broadcast linear sections to all nodes */
       sendSignal(rg, GSN_TESTSIG, signal, signal->length(), JBB, ptr, secs);
     }
     for(Uint32 i = 0; i<secs; i++){
@@ -3310,10 +3362,11 @@ Cmvmi::execTESTSIG(Signal* signal){
     const Uint32 secs = handle.m_cnt;
     for(i = 0; i<secs; i++){
       SegmentedSectionPtr sptr(0,0,0);
-      handle.getSection(sptr, i);
+      ndbrequire(handle.getSection(sptr, i));
+      Uint32* p = new Uint32[sptr.sz];
+      copy(p, sptr);
+      ptr[i].p = p;
       ptr[i].sz = sptr.sz;
-      ptr[i].p = new Uint32[sptr.sz];
-      copy(ptr[i].p, sptr);
     }
 
     NodeReceiverGroup tmp;
@@ -3385,10 +3438,11 @@ Cmvmi::execTESTSIG(Signal* signal){
     std::memset(g_test, 0, sizeof(g_test));
     for(i = 0; i<secs; i++){
       SegmentedSectionPtr sptr(0,0,0);
-      handle.getSection(sptr, i);
+      ndbrequire(handle.getSection(sptr, i));
+      Uint32* p = new Uint32[sptr.sz];
+      copy(p, sptr);
+      g_test[i].p = p;
       g_test[i].sz = sptr.sz;
-      g_test[i].p = new Uint32[sptr.sz];
-      copy(g_test[i].p, sptr);
     }
     
     releaseSections(handle);

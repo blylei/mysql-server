@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -127,7 +127,7 @@ class AsyncReplicasetTest : public RouterComponentTest {
                       const std::string &routing_section,
                       const std::string &state_file_path,
                       const int expected_errorcode = EXIT_SUCCESS,
-                      std::chrono::milliseconds wait_for_notify_ready = 5s) {
+                      std::chrono::milliseconds wait_for_notify_ready = 30s) {
     const std::string masterkey_file =
         Path(temp_test_dir).join("master.key").str();
     const std::string keyring_file = Path(temp_test_dir).join("keyring").str();
@@ -215,7 +215,7 @@ TEST_F(AsyncReplicasetTest, NoChange) {
         "// Make our metadata server to return all 3 nodes as a cluster "
         "members");
 
-    // each memeber should report the same view_id (=1)
+    // each member should report the same view_id (=1)
     set_mock_metadata(cluster_http_ports[i], cluster_id, cluster_nodes_ports, 0,
                       view_id);
   }
@@ -580,14 +580,14 @@ TEST_F(AsyncReplicasetTest, ClusterSecondaryQueryErrors) {
       "the metadata from both secondaries");
   check_state_file(state_file, ClusterType::RS_V2, cluster_id,
                    cluster_nodes_ports, view_id);
-  const std::string log_content = router.get_full_logfile();
+  const std::string log_content = router.get_logfile_content();
 
   for (size_t i = 1; i <= 2; i++) {
     const std::string pattern =
         "metadata_cache WARNING .* Failed fetching metadata from metadata "
         "server on 127.0.0.1:" +
         std::to_string(cluster_nodes_ports[i]);
-    ASSERT_TRUE(pattern_found(log_content, pattern)) << log_content;
+    ASSERT_TRUE(pattern_found(log_content, pattern));
   }
 }
 
@@ -1366,7 +1366,7 @@ TEST_P(NodeUnavailableTest, NodeUnavailable) {
   SCOPED_TRACE("// The cluster has 4 nodes but the first SECONDARY is down");
   const auto trace_file =
       get_data_dir().join("metadata_dynamic_nodes_v2_ar.js").str();
-  for (unsigned i = 0, nodes = 0; i < CLUSTER_NODES; ++i) {
+  for (unsigned i = 0; i < CLUSTER_NODES; ++i) {
     if (i == 1) continue;
     cluster_nodes.push_back(&ProcessManager::launch_mysql_server_mock(
         trace_file, cluster_nodes_ports[i], EXIT_SUCCESS, false,
@@ -1375,7 +1375,6 @@ TEST_P(NodeUnavailableTest, NodeUnavailable) {
     SCOPED_TRACE("// All 4 nodes are in the metadata");
     set_mock_metadata(cluster_http_ports[i], cluster_id, cluster_nodes_ports,
                       /*primary_id=*/0, view_id);
-    nodes++;
   }
 
   const std::string state_file = create_state_file(
@@ -1576,9 +1575,8 @@ TEST_P(ClusterTypeMismatchTest, ClusterTypeMismatch) {
                                      "password", "", ""));
 
   SCOPED_TRACE("// Logfile should contain proper message");
-  const std::string log_content = router.get_full_logfile();
-  ASSERT_TRUE(pattern_found(log_content, GetParam().expected_error))
-      << log_content;
+  const std::string log_content = router.get_logfile_content();
+  ASSERT_TRUE(pattern_found(log_content, GetParam().expected_error));
 }
 
 INSTANTIATE_TEST_SUITE_P(

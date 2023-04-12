@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 #include "mysqlrouter/classic_protocol_codec_message.h"
 
 #include <list>
+#include <optional>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -588,10 +589,7 @@ const CodecParam<classic_protocol::message::server::Row>
          {{"abc"s, "def"s}},
          {},
          {0x03, 'a', 'b', 'c', 0x03, 'd', 'e', 'f'}},
-        {"null_null",
-         {{stdx::make_unexpected(), stdx::make_unexpected()}},
-         {},
-         {0xfb, 0xfb}},
+        {"null_null", {{std::nullopt, std::nullopt}}, {}, {0xfb, 0xfb}},
 };
 
 INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageServerRowTest,
@@ -1140,18 +1138,19 @@ INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageClientStmtResetTest,
 
 // client::StmtSetOption
 
-using CodecMessageClientStmtSetOptionTest =
-    CodecTest<classic_protocol::message::client::StmtSetOption>;
+using CodecMessageClientSetOptionTest =
+    CodecTest<classic_protocol::message::client::SetOption>;
 
-TEST_P(CodecMessageClientStmtSetOptionTest, encode) { test_encode(GetParam()); }
-TEST_P(CodecMessageClientStmtSetOptionTest, decode) { test_decode(GetParam()); }
+TEST_P(CodecMessageClientSetOptionTest, encode) { test_encode(GetParam()); }
+TEST_P(CodecMessageClientSetOptionTest, decode) { test_decode(GetParam()); }
 
-const CodecParam<classic_protocol::message::client::StmtSetOption>
+const CodecParam<classic_protocol::message::client::SetOption>
     codec_stmt_set_option_param[] = {
-        {"set_option_stmt_1", {1}, {}, {0x1b, 0x01, 0x00}},
+        {"set_option_0", {0}, {}, {0x1b, 0x00, 0x00}},  // multi-stmts-off
+        {"set_option_1", {1}, {}, {0x1b, 0x01, 0x00}},  // multi-stmts-on
 };
 
-INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageClientStmtSetOptionTest,
+INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageClientSetOptionTest,
                          ::testing::ValuesIn(codec_stmt_set_option_param),
                          [](auto const &test_param_info) {
                            return test_param_info.param.test_name;
@@ -1563,7 +1562,7 @@ const CodecParam<classic_protocol::message::server::StmtRow>
          {},
          {0x00, 0x00, 0x06, 'f', 'o', 'o', 'b', 'a', 'r'}},
         {"null",
-         {{classic_protocol::field_type::VarString}, {stdx::make_unexpected()}},
+         {{classic_protocol::field_type::VarString}, {std::nullopt}},
          {},
          {0x00, 0x04}},
 };

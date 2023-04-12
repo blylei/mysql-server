@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 
 #include <stdint.h>
 
+#include "sql/item.h"
 #include "sql/join_optimizer/bit_utils.h"
 #include "sql/join_optimizer/node_map.h"
 #include "sql/join_optimizer/overflow_bitset.h"
@@ -33,13 +34,7 @@
 #include "sql/sql_class.h"
 
 struct AccessPath;
-class Item_func_eq;
-
-struct ContainedSubquery {
-  AccessPath *path;
-  bool materializable;
-  int row_width;  // Of the subquery's rows.
-};
+class Item_eq_base;
 
 // Some information about each predicate that the join optimizer would like to
 // have available in order to avoid computing it anew for each use of that
@@ -76,7 +71,7 @@ struct ConflictRule {
   These are used as an abstract precursor to the join hypergraph;
   they represent the joins in the query block more or less directly,
   without any reordering. (The parser should largely have output a
-  structure like this instead of TABLE_LIST, but we are not there yet.)
+  structure like this instead of Table_ref, but we are not there yet.)
   The only real manipulation we do on them is pushing down conditions,
   identifying equijoin conditions from other join conditions,
   and identifying join conditions that touch given tables (also a form
@@ -125,7 +120,7 @@ struct RelationalExpression {
   hypergraph::NodeMap nodes_in_subtree;
 
   // If type == TABLE.
-  const TABLE_LIST *table;
+  const Table_ref *table;
   Mem_root_array<Item *> join_conditions_pushable_to_this;
   // Tables in the same companion set are those that are inner-joined
   // against each other; we use this to see in what parts of the graph
@@ -145,7 +140,7 @@ struct RelationalExpression {
   Mem_root_array<RelationalExpression *>
       multi_children;  // See MULTI_INNER_JOIN.
   Mem_root_array<Item *> join_conditions;
-  Mem_root_array<Item_func_eq *> equijoin_conditions;
+  Mem_root_array<Item_eq_base *> equijoin_conditions;
 
   // For each element in join_conditions and equijoin_conditions (respectively),
   // contains some cached properties that the join optimizer would like to have

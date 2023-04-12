@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -100,8 +100,8 @@ class Ndb_binlog_client {
 
   /**
    * @brief table_should_have_event_op, decide if a NdbEventOperation
-   * should be crated for the current table. Only table which need to
-   * be binlogged would create such a event operation. The exeception
+   * should be created for the current table. Only table which need to
+   * be binlogged would create such a event operation. The exception
    * is the ndb_schema table who subscribes to events for schema distribution.
    * @return  true if table should have a NdbEventOperation
    */

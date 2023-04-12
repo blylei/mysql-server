@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2001, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2001, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,7 +30,7 @@
   Note that we can't have assertion on file descriptors;  The reason for
   this is that during mysql shutdown, another thread can close a file
   we are working on.  In this case we should just return read errors from
-  the file descriptior.
+  the file descriptor.
 */
 
 #include "my_config.h"
@@ -52,9 +52,9 @@
 #include "my_inttypes.h"
 #include "my_io.h"
 #include "my_macros.h"
+#include "mysys_err.h"
 #include "template_utils.h"
 #include "vio/vio_priv.h"
-
 #ifdef FIONREAD_IN_SYS_FILIO
 #include <sys/filio.h>
 #endif
@@ -470,12 +470,19 @@ int vio_shutdown(Vio *vio) {
     if (mysql_socket_shutdown(vio->mysql_socket, SHUT_RDWR)) r = -1;
 
 #ifdef USE_PPOLL_IN_VIO
-    if (vio->thread_id != 0 && vio->poll_shutdown_flag.test_and_set()) {
+    assert(vio->thread_id.has_value());
+    if (vio->thread_id.value() != 0 && vio->poll_shutdown_flag.test_and_set()) {
       // Send signal to wake up from poll.
-      if (pthread_kill(vio->thread_id, SIGALRM) == 0)
+      int en = pthread_kill(vio->thread_id.value(), SIGALRM);
+      if (en == 0)
         vio_wait_until_woken(vio);
-      else
-        perror("Error in pthread_kill");
+      else {
+        char buf[512];
+        my_message_local(WARNING_LEVEL, EE_PTHREAD_KILL_FAILED,
+                         vio->thread_id.value(), "SIGALRM",
+                         strerror_r(en, buf, sizeof(buf)));
+        assert("pthread_kill failure" == nullptr);
+      }
     }
 #elif defined HAVE_KQUEUE
     if (vio->kq_fd != -1 && vio->kevent_wakeup_flag.test_and_set())
@@ -501,8 +508,14 @@ int vio_shutdown(Vio *vio) {
 #ifndef NDEBUG
 
 #ifdef _WIN32
+#ifdef _WIN64
 #define SOCKET_PRINTF_FORMAT "%llu"
 #else
+#define SOCKET_PRINTF_FORMAT "%lu"
+#endif
+
+#else  // _WIN32
+
 #define SOCKET_PRINTF_FORMAT "%d"
 #endif
 
@@ -564,13 +577,13 @@ static void vio_get_normalized_ip(const struct sockaddr *src, size_t src_length,
       break;
 
     case AF_INET6: {
-      const struct sockaddr_in6 *src_addr6 = (const struct sockaddr_in6 *)src;
+      const auto *src_addr6 = (const struct sockaddr_in6 *)src;
       const struct in6_addr *src_ip6 = &(src_addr6->sin6_addr);
       const uint32 *src_ip6_int32 =
           pointer_cast<const uint32 *>(src_ip6->s6_addr);
 
       if (IN6_IS_ADDR_V4MAPPED(src_ip6) || IN6_IS_ADDR_V4COMPAT(src_ip6)) {
-        struct sockaddr_in *dst_ip4 = (struct sockaddr_in *)dst;
+        auto *dst_ip4 = (struct sockaddr_in *)dst;
 
         /*
           This is an IPv4-mapped or IPv4-compatible IPv6 address. It should
@@ -625,8 +638,8 @@ static void vio_get_normalized_ip(const struct sockaddr *src, size_t src_length,
 bool vio_get_normalized_ip_string(const struct sockaddr *addr,
                                   size_t addr_length, char *ip_string,
                                   size_t ip_string_size) {
-  struct sockaddr_storage norm_addr_storage;
-  struct sockaddr *norm_addr = (struct sockaddr *)&norm_addr_storage;
+  struct sockaddr_storage norm_addr_storage {};
+  auto *norm_addr = (struct sockaddr *)&norm_addr_storage;
   size_t norm_addr_length;
   int err_code;
 
@@ -678,8 +691,8 @@ bool vio_peer_addr(Vio *vio, char *ip_buffer, uint16 *port,
     int err_code;
     char port_buffer[NI_MAXSERV];
 
-    struct sockaddr_storage addr_storage;
-    struct sockaddr *addr = (struct sockaddr *)&addr_storage;
+    struct sockaddr_storage addr_storage {};
+    auto *addr = (struct sockaddr *)&addr_storage;
     socket_len_t addr_length = sizeof(addr_storage);
 
     /* Get sockaddr by socked fd. */
@@ -828,7 +841,10 @@ int vio_io_wait(Vio *vio, enum enum_vio_io_event event, int timeout) {
 
 #ifdef USE_PPOLL_IN_VIO
   // Check if shutdown is in progress, if so return -1
-  if (vio->poll_shutdown_flag.test_and_set()) return -1;
+  if (vio->poll_shutdown_flag.test_and_set()) {
+    MYSQL_END_SOCKET_WAIT(locker, 0);
+    return -1;
+  }
 
   timespec ts;
   timespec *ts_ptr = nullptr;
@@ -846,12 +862,14 @@ int vio_io_wait(Vio *vio, enum enum_vio_io_event event, int timeout) {
   do {
 #ifdef USE_PPOLL_IN_VIO
     /*
-      vio->signal_mask is only useful when thread_id != 0.
-      thread_id is only set for servers, so signal_mask is unused for client
-      libraries.
+      thread_id is only set to std::nullopt or a non-zero value for servers, so
+      signal_mask is unused for client libraries. A valid value for thread_id
+      is not assigned until there is attempt to shut down the connection.
     */
     ret = ppoll(&pfd, 1, ts_ptr,
-                vio->thread_id != 0 ? &vio->signal_mask : nullptr);
+                !vio->thread_id.has_value() || (vio->thread_id.value() != 0)
+                    ? &vio->signal_mask
+                    : nullptr);
 #else
     ret = poll(&pfd, 1, timeout);
 #endif
@@ -992,7 +1010,10 @@ int vio_io_wait(Vio *vio, enum enum_vio_io_event event, int timeout) {
                  (static_cast<long>(timeout) % 1000) * 1000000};
 
   // Check if shutdown is in progress, if so return -1.
-  if (vio->kevent_wakeup_flag.test_and_set()) return -1;
+  if (vio->kevent_wakeup_flag.test_and_set()) {
+    MYSQL_END_SOCKET_WAIT(locker, 0);
+    return -1;
+  }
 
   int retry_count = 0;
   do {
@@ -1123,9 +1144,8 @@ bool vio_socket_connect(Vio *vio, struct sockaddr *addr, socklen_t len,
   if (nonblocking && wait) {
     if (connect_done) *connect_done = false;
     return false;
-  } else {
-    return (ret != 0);
   }
+  return (ret != 0);
 }
 
 /**
@@ -1168,7 +1188,7 @@ bool vio_is_connected(Vio *vio) {
   if (!bytes && vio->type == VIO_TYPE_SSL)
     bytes = SSL_pending((SSL *)vio->ssl_arg);
 
-  return bytes ? true : false;
+  return bytes != 0;
 }
 
 #ifndef NDEBUG

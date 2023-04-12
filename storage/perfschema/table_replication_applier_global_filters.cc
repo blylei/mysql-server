@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -183,7 +183,8 @@ int table_replication_applier_global_filters::read_row_values(
     if (read_all || bitmap_is_set(table->read_set, f->field_index())) {
       switch (f->field_index()) {
         case 0: /* filter_name */
-          set_field_char_utf8(f, m_row.filter_name, m_row.filter_name_length);
+          set_field_char_utf8mb4(f, m_row.filter_name,
+                                 m_row.filter_name_length);
           break;
         case 1: /* filter_rule */
           if (!m_row.filter_rule.is_empty())

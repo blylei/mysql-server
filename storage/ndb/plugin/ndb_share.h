@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -106,7 +106,7 @@ struct NDB_SHARE {
     // Counter for rows changed since m_table_stats was saved. It's kept
     // separate and is atomic to allow concurrent updates from threads while
     // they are committing without locking the mutex. The counter value is
-    // appended to the row count when the cached table stats are retrived.
+    // appended to the row count when the cached table stats are retrieved.
     // NOTE! The counter is updated with changes from this MySQL Server but
     // changes to the table in NDB are not reflected.
     std::atomic<int64_t> atomic_row_count_changed{0};
@@ -167,7 +167,7 @@ struct NDB_SHARE {
     FLAG_BINLOG_MODE_MINIMAL_UPDATE = 1UL << 5,
 
     // Flag describing if table have event
-    // NOTE! The decision wheter or not a table have event is decided
+    // NOTE! The decision whether or not a table have event is decided
     // only once by Ndb_binlog_client::table_should_have_event()
     FLAG_TABLE_HAVE_EVENT = 1UL << 6,
 

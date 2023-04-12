@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -152,7 +152,7 @@ class Plugin_gcs_message {
     CT_GROUP_VALIDATION_MESSAGE = 9,
 
     // This cargo type is used for synchronization before executing a
-    // transation.
+    // transaction.
     CT_SYNC_BEFORE_EXECUTION_MESSAGE = 10,
 
     // This cargo type is used for transaction data with guarantee.

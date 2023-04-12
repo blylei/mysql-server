@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates. All rights
 reserved.
 
    This program is free software; you can redistribute it and/or modify
@@ -76,7 +76,7 @@ int set_xcom_socket_accept_cb(xcom_socket_accept_cb x) {
 void Xcom_network_provider_library::init_server_addr(
     struct sockaddr **sock_addr, socklen_t *sock_len, xcom_port port,
     int family) {
-  struct addrinfo *address_info = NULL, hints, *address_info_loop;
+  struct addrinfo *address_info = nullptr, hints, *address_info_loop;
   memset(&hints, 0, sizeof(hints));
 
   hints.ai_flags = AI_PASSIVE;
@@ -299,9 +299,7 @@ void Xcom_network_provider_library::gcs_shutdown_socket(int *sock) {
              &dwBytesReturned, nullptr, nullptr);
   }
   if (DisconnectEx != nullptr) {
-    (DisconnectEx(*sock, (LPOVERLAPPED) nullptr, (DWORD)0, (DWORD)0) == TRUE)
-        ? 0
-        : -1;
+    DisconnectEx(*sock, (LPOVERLAPPED) nullptr, (DWORD)0, (DWORD)0);
   } else {
     shutdown(*sock, SOCK_SHUT_RDWR);
   }
@@ -493,7 +491,7 @@ result Xcom_network_provider_library::checked_create_socket(int domain,
 }
 
 /**
-  @brief Retreives a node IPv4 address, if it exists.
+  @brief Retrieves a node IPv4 address, if it exists.
 
   If a node is v4 reachable, means one of two:
   - The raw address is V4

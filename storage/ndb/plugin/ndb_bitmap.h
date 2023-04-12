@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -50,7 +50,7 @@ class Ndb_bitmap_buf {
  public:
   Ndb_bitmap_buf() {}
 
-  constexpr size_t size_in_bytes() const { return sizeof(m_buf); }
+  static constexpr size_t size_in_bytes() { return sizeof(m_buf); }
 
   my_bitmap_map *buf() { return m_buf; }
 };
@@ -61,10 +61,10 @@ class Ndb_bitmap_buf {
   @param buf        Buffer to hold the bits for the bitmap
   @param num_bits   Max number of bits to store in the bitmap
 
-  NOTE! Since no memory need to be allocated the 'bitmap_init' funtion
+  NOTE! Since no memory need to be allocated the 'bitmap_init' function
   never fails.
 
-  NOTE! Size of provided buffer automatically defferred by
+  NOTE! Size of provided buffer automatically deferred by
   usage of template and thus it's possible to check that
   bitmap is not initialized larger than what the buffer can hold.
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2006, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2006, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,8 +34,10 @@
 
 #include "my_inttypes.h"
 #include "my_sharedlib.h"
-#include "mysql/components/services/mysql_mutex_bits.h"
+#include "mysql/components/services/bits/mysql_mutex_bits.h"
+#include "mysqld_error.h"
 #include "sql/dd/string_type.h"
+#include "sql/handler.h"
 #include "sql/mdl.h"
 
 class Alter_info;
@@ -48,7 +50,7 @@ class handler;
 struct CHARSET_INFO;
 struct MEM_ROOT;
 struct TABLE;
-struct TABLE_LIST;
+class Table_ref;
 struct handlerton;
 
 namespace dd {
@@ -86,28 +88,12 @@ static const uint NO_FK_RENAME = 1 << 4;
 /** Don't change generated check constraint names while renaming table. */
 static const uint NO_CC_RENAME = 1 << 5;
 
-// MDL lock types used for ALTER TABLE SECONDARY_LOAD.
-
-/** The MDL type used when initially opening a table for SECONDARY_LOAD */
-constexpr enum_mdl_type SECLOAD_SCAN_START_MDL = MDL_SHARED_NO_WRITE;
-
-/**
-  The weaker MDL which the secondary engine plugin may downgrade to after
-  a parallel scan has been started
-*/
-constexpr enum_mdl_type SECLOAD_PAR_SCAN_MDL = MDL_SHARED_UPGRADABLE;
-
-/**
-  The MDL which must be acquired before the old table definition
-  can be evicted from the table definition cache.
-*/
-constexpr enum_mdl_type SECLOAD_TDC_EVICT_MDL = MDL_EXCLUSIVE;
-
 handlerton *get_viable_handlerton_for_create(THD *thd, const char *table_name,
                                              const HA_CREATE_INFO &ci);
 
 size_t filename_to_tablename(const char *from, char *to, size_t to_length,
-                             bool stay_quiet = false);
+                             bool stay_quiet = false,
+                             bool *has_errors = nullptr);
 size_t tablename_to_filename(const char *from, char *to, size_t to_length);
 size_t build_table_filename(char *buff, size_t bufflen, const char *db,
                             const char *table, const char *ext, uint flags,
@@ -121,7 +107,7 @@ size_t inline build_table_filename(char *buff, size_t bufflen, const char *db,
                               &truncated_not_used);
 }
 size_t build_tmptable_filename(THD *thd, char *buff, size_t bufflen);
-bool mysql_create_table(THD *thd, TABLE_LIST *create_table,
+bool mysql_create_table(THD *thd, Table_ref *create_table,
                         HA_CREATE_INFO *create_info, Alter_info *alter_info);
 bool mysql_create_table_no_lock(THD *thd, const char *db,
                                 const char *table_name,
@@ -129,7 +115,7 @@ bool mysql_create_table_no_lock(THD *thd, const char *db,
                                 Alter_info *alter_info, uint select_field_count,
                                 bool find_parent_keys, bool *is_trans,
                                 handlerton **post_ddl_ht);
-bool mysql_discard_or_import_tablespace(THD *thd, TABLE_LIST *table_list);
+bool mysql_discard_or_import_tablespace(THD *thd, Table_ref *table_list);
 
 /**
   Helper class for keeping track for which tables we need to invalidate
@@ -147,6 +133,57 @@ class Foreign_key_parents_invalidator {
   const Parent_map &parents() const { return m_parent_map; }
   bool is_empty() const { return m_parent_map.empty(); }
   void clear() { m_parent_map.clear(); }
+};
+
+/**
+  Auxiliary class implementing RAII principle for getting permission for/
+  notification about finished DDL statements from interested storage engines.
+
+  @see handlerton::ha_notify_table_ddl for details.
+*/
+class Table_ddl_hton_notification_guard {
+ public:
+  Table_ddl_hton_notification_guard(
+      THD *thd, const MDL_key *key, ha_ddl_type ddl_type,
+      const char *old_db_name = nullptr, const char *old_table_name = nullptr,
+      const char *new_db_name = nullptr,
+      const char *new_table_name = nullptr) noexcept
+      : m_hton_notified(false),
+        m_thd(thd),
+        m_key(*key),
+        m_ddl_type(ddl_type),
+        m_old_db_name(old_db_name),
+        m_old_table_name(old_table_name),
+        m_new_db_name(new_db_name),
+        m_new_table_name(new_table_name) {}
+
+  [[nodiscard]] bool notify() noexcept {
+    if (!ha_notify_table_ddl(m_thd, &m_key, HA_NOTIFY_PRE_EVENT, m_ddl_type,
+                             m_old_db_name, m_old_table_name, m_new_db_name,
+                             m_new_table_name)) {
+      m_hton_notified = true;
+      return false;
+    }
+    my_error(ER_LOCK_REFUSED_BY_ENGINE, MYF(0));
+    return true;
+  }
+
+  ~Table_ddl_hton_notification_guard() {
+    if (m_hton_notified)
+      (void)ha_notify_table_ddl(m_thd, &m_key, HA_NOTIFY_POST_EVENT, m_ddl_type,
+                                m_old_db_name, m_old_table_name, m_new_db_name,
+                                m_new_table_name);
+  }
+
+ private:
+  bool m_hton_notified;
+  THD *m_thd;
+  const MDL_key m_key;
+  const ha_ddl_type m_ddl_type;
+  const char *m_old_db_name;
+  const char *m_old_table_name;
+  const char *m_new_db_name;
+  const char *m_new_table_name;
 };
 
 /*
@@ -305,6 +342,25 @@ bool collect_fk_names_for_new_fks(THD *thd, const char *db_name,
     handlerton *hton, Foreign_key_parents_invalidator *fk_invalidator);
 
 /**
+  As a result of simple rename table operation, orphan non-self-referencing
+  foreign keys may become non-orphan/adopted self-referencing foreign keys.
+  For such transformed foreign key, check that table has compatible referenced
+  column and parent key. Also, update DD.UNIQUE_CONSTRAINT_NAME.
+
+  @param  thd             Thread handle.
+  @param  db              Table's old schema.
+  @param  table_name      Table's old name.
+  @param  new_db          Table's new schema.
+  @param  new_table_name  Table's new name.
+  @param  hton            Table's SE.
+
+  @retval operation outcome, false if no error.
+*/
+[[nodiscard]] bool adjust_adopted_self_ref_fk_for_simple_rename_table(
+    THD *thd, const char *db, const char *table_name, const char *new_db,
+    const char *new_table_name, handlerton *hton);
+
+/**
   Update referenced table names and the unique constraint name for FKs
   affected by RENAME TABLE operation.
 
@@ -395,23 +451,23 @@ bool mysql_prepare_alter_table(THD *thd, const dd::Table *src_table,
 bool mysql_trans_prepare_alter_copy_data(THD *thd);
 bool mysql_trans_commit_alter_copy_data(THD *thd);
 bool mysql_alter_table(THD *thd, const char *new_db, const char *new_name,
-                       HA_CREATE_INFO *create_info, TABLE_LIST *table_list,
+                       HA_CREATE_INFO *create_info, Table_ref *table_list,
                        Alter_info *alter_info);
 bool mysql_compare_tables(THD *thd, TABLE *table, Alter_info *alter_info,
                           HA_CREATE_INFO *create_info, bool *metadata_equal);
-bool mysql_recreate_table(THD *thd, TABLE_LIST *table_list, bool table_copy);
-bool mysql_create_like_table(THD *thd, TABLE_LIST *table, TABLE_LIST *src_table,
+bool mysql_recreate_table(THD *thd, Table_ref *table_list, bool table_copy);
+bool mysql_create_like_table(THD *thd, Table_ref *table, Table_ref *src_table,
                              HA_CREATE_INFO *create_info);
 bool mysql_rename_table(THD *thd, handlerton *base, const char *old_db,
                         const char *old_name, const char *old_fk_db,
                         const char *old_fk_name, const dd::Schema &new_schema,
                         const char *new_db, const char *new_name, uint flags);
 
-bool mysql_checksum_table(THD *thd, TABLE_LIST *table_list,
+bool mysql_checksum_table(THD *thd, Table_ref *table_list,
                           HA_CHECK_OPT *check_opt);
-bool mysql_rm_table(THD *thd, TABLE_LIST *tables, bool if_exists,
+bool mysql_rm_table(THD *thd, Table_ref *tables, bool if_exists,
                     bool drop_temporary);
-bool mysql_rm_table_no_locks(THD *thd, TABLE_LIST *tables, bool if_exists,
+bool mysql_rm_table_no_locks(THD *thd, Table_ref *tables, bool if_exists,
                              bool drop_temporary, bool drop_database,
                              bool *dropped_non_atomic_flag,
                              std::set<handlerton *> *post_ddl_htons,
@@ -430,7 +486,7 @@ bool mysql_rm_table_no_locks(THD *thd, TABLE_LIST *tables, bool if_exists,
   @retval True  - Failure.
 */
 [[nodiscard]] bool rm_table_do_discovery_and_lock_fk_tables(THD *thd,
-                                                            TABLE_LIST *tables);
+                                                            Table_ref *tables);
 
 bool quick_rm_table(THD *thd, handlerton *base, const char *db,
                     const char *table_name, uint flags);
@@ -533,7 +589,7 @@ extern MYSQL_PLUGIN_IMPORT const char *primary_key_name;
     @retval true  Failure
 */
 
-bool lock_trigger_names(THD *thd, TABLE_LIST *tables);
+bool lock_trigger_names(THD *thd, Table_ref *tables);
 struct TYPELIB;
 TYPELIB *create_typelib(MEM_ROOT *mem_root, Create_field *field_def);
 
@@ -547,7 +603,7 @@ TYPELIB *create_typelib(MEM_ROOT *mem_root, Create_field *field_def);
   @retval       false   Success.
   @retval       true    Failure.
 */
-bool lock_check_constraint_names(THD *thd, TABLE_LIST *tables);
+bool lock_check_constraint_names(THD *thd, Table_ref *tables);
 
 /**
   Method to lock check constraint names for rename table operation.

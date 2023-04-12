@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -107,7 +107,7 @@ TEST_P(LoaderReadTest, Available) {
 }
 
 TEST_P(LoaderReadTest, load_non_existant_fails) {
-  // Test that loading something non-existant works
+  // Test that loading something non-existent works
   EXPECT_THROW(loader->load("nonexistant-plugin"), bad_section);
 }
 
@@ -186,6 +186,7 @@ TEST(TestStart, StartFailure) {
                                      std::vector<std::string>(),
                                      mysql_harness::Config::allow_keys);
   config.read(Path(test_data_dir).join("tests-start-1.cfg"));
+
   mysql_harness::Loader loader("harness", config);
   try {
     loader.start();

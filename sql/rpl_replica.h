@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,7 +34,7 @@
 #include "my_psi_config.h"
 #include "my_thread.h"  // my_start_routine
 #include "mysql.h"      // MYSQL
-#include "mysql/components/services/psi_thread_bits.h"
+#include "mysql/components/services/bits/psi_thread_bits.h"
 #include "mysql_com.h"
 #include "sql/changestreams/apply/constants.h"
 #include "sql/current_thd.h"
@@ -46,6 +46,7 @@ class THD;
 struct LEX_MASTER_INFO;
 struct mysql_cond_t;
 struct mysql_mutex_t;
+class Rpl_channel_filters;
 
 typedef struct struct_slave_connection LEX_SLAVE_CONNECTION;
 
@@ -291,12 +292,12 @@ extern bool server_id_supplied;
 
       [Note: purge_logs contains a known bug: LOCK_index should not be
       taken before LOCK_thd_list.  This implies that, e.g.,
-      purge_master_logs can deadlock with reset_master.  However,
+      purge_source_logs_to_file can deadlock with reset_master.  However,
       although purge_first_log and reset_slave take locks in reverse
       order, they cannot deadlock because they both first acquire
       rli.data_lock.]
 
-    purge_master_logs, purge_master_logs_before_date, purge:
+    purge_source_logs_to_file, purge_source_logs_before_date, purge:
       (binlog.purge_logs) binlog.LOCK_index, LOCK_thd_list, thd.linfo.lock
 
     purge_first_log:
@@ -363,6 +364,52 @@ extern ulonglong relay_log_space_limit;
 extern const char *relay_log_index;
 extern const char *relay_log_basename;
 
+/// @brief Helper class used to initialize the replica (includes init_replica())
+/// @details init_replica is called once during the mysqld start-up
+class ReplicaInitializer {
+ public:
+  /// @brief Constructor, calls init_replica()
+  /// @param[in] opt_initialize Server option used to indicate whether mysqld
+  /// has been started with --initialize
+  /// @param[in] opt_skip_replica_start When true, skips the start of
+  /// replication threads
+  /// @param[in] filters Replication filters
+  /// @param[in] replica_skip_erors
+  ReplicaInitializer(bool opt_initialize, bool opt_skip_replica_start,
+                     Rpl_channel_filters &filters, char **replica_skip_erors);
+
+  /// @brief Gets initialization code set-up at replica initialization
+  /// @return Error code obtained during the replica initialization
+  int get_initialization_code() const;
+
+ private:
+  /// @brief This function starts replication threads
+  /// @param[in] skip_replica_start When true, skips the start of replication
+  /// threads threads
+  void start_replication_threads(bool skip_replica_start = true);
+
+  /// @brief Initializes replica PSI keys in case PSI interface is available
+  static void init_replica_psi_keys();
+
+  /// @brief Performs replica initialization, creates default replication
+  /// channel and sets channel filters
+  /// @returns Error code
+  int init_replica();
+
+  /// @brief In case debug mode is on, prints channel information
+  void print_channel_info() const;
+
+  /// @brief This function starts replication threads
+  void start_threads();
+
+  bool m_opt_initialize_replica =
+      false;  ///< Indicates whether to initialize replica
+  bool m_opt_skip_replica_start =
+      false;  ///< Indicates whether replica threads should be started or not
+  int m_init_code = 0;    ///< Replica initialization error code
+  int m_thread_mask = 0;  ///< Thread mask indicating type of the thread
+};
+
 /*
   3 possible values for Master_info::slave_running and
   Relay_log_info::slave_running.
@@ -401,7 +448,6 @@ bool reencrypt_relay_logs();
 int flush_relay_logs(Master_info *mi, THD *thd);
 int reset_slave(THD *thd, Master_info *mi, bool reset_all);
 int reset_slave(THD *thd);
-int init_replica();
 int init_recovery(Master_info *mi);
 /**
   Call mi->init_info() and/or mi->rli->init_info(), which will read
@@ -421,7 +467,7 @@ int init_recovery(Master_info *mi);
   (thread_mask&SLAVE_SQL)!=0, then mi->rli->init_info is called.
 
   @param force_load repositories will only read information if they
-  are not yet intialized. When true this flag forces the repositories
+  are not yet initialized. When true this flag forces the repositories
   to load information from table or file.
 
   @param skip_received_gtid_set_recovery When true, skips the received GTID
@@ -474,10 +520,10 @@ bool reset_info(Master_info *mi);
   @param flush_relay_log should the method also flush the relay log file
 
   @param skip_repo_persistence if this method shall skip the repository flush
-                               This wont skip the relay log flush if
+                               This won't skip the relay log flush if
                                flush_relay_log = true
 
-  @returns 0 if no error ocurred, !=0 if an error ocurred
+  @returns 0 if no error occurred, !=0 if an error occurred
 */
 int flush_master_info(Master_info *mi, bool force, bool need_lock = true,
                       bool flush_relay_log = true,
@@ -574,7 +620,7 @@ extern "C" void *handle_slave_sql(void *arg);
     @param[in] reconnect  If its need to reconnect to existing source.
     @param[in] host       The Host name or ip address of the source to which
                           connection need to be made.
-    @param[in] port       The Port fo the source to which connection need to
+    @param[in] port       The Port of the source to which connection need to
                           be made.
     @param[in] is_io_thread  To determine if its IO or Monitor IO thread.
 

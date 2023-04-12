@@ -1,4 +1,4 @@
-/* Copyright (c) 2007, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2007, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -37,10 +37,10 @@
 #include "my_systime.h"
 #include "my_thread.h"
 #include "mysql/components/services/bits/psi_bits.h"
-#include "mysql/components/services/psi_cond_bits.h"
-#include "mysql/components/services/psi_memory_bits.h"
-#include "mysql/components/services/psi_mutex_bits.h"
-#include "mysql/components/services/psi_rwlock_bits.h"
+#include "mysql/components/services/bits/psi_cond_bits.h"
+#include "mysql/components/services/bits/psi_memory_bits.h"
+#include "mysql/components/services/bits/psi_mutex_bits.h"
+#include "mysql/components/services/bits/psi_rwlock_bits.h"
 #include "mysql/psi/mysql_cond.h"
 #include "mysql/psi/mysql_mdl.h"
 #include "mysql/psi/mysql_memory.h"
@@ -1280,7 +1280,8 @@ extern "C" {
   is unused - i.e. doesn't have any locks on both "fast" and "slow" paths
   and is not marked as deleted.
 */
-static int mdl_lock_match_unused(const uchar *arg) {
+static int mdl_lock_match_unused(const uchar *arg,
+                                 void *match_arg [[maybe_unused]]) {
   const MDL_lock *lock = (const MDL_lock *)arg;
   /*
     It is OK to check MDL_lock::m_fast_path_state non-atomically here
@@ -1319,7 +1320,7 @@ void MDL_map::remove_random_unused(MDL_context *ctx, LF_PINS *pins,
     high enough, there is a good chance for this technique to succeed.
   */
   MDL_lock *lock = static_cast<MDL_lock *>(lf_hash_random_match(
-      &m_locks, pins, &mdl_lock_match_unused, ctx->get_random()));
+      &m_locks, pins, &mdl_lock_match_unused, ctx->get_random(), nullptr));
 
   if (lock == nullptr || lock == MY_LF_ERRPTR) {
     /*
@@ -1484,7 +1485,7 @@ bool MDL_context::fix_pins() {
   Note that initialization and allocation are split into two
   calls. This is to allow flexible memory management of lock
   requests. Normally a lock request is stored in statement memory
-  (e.g. is a member of struct TABLE_LIST), but we would also like
+  (e.g. is a member of class Table_ref), but we would also like
   to allow allocation of lock requests in other memory roots,
   for example in the grant subsystem, to lock privilege tables.
 
@@ -2118,7 +2119,7 @@ const MDL_lock::MDL_lock_strategy MDL_lock::m_scoped_lock_strategy = {
       different lock types.
 
       Scoped locks only use the first array which represents the "default"
-      priority matrix. The remaing 3 matrices are not relevant for them.
+      priority matrix. The remaining 3 matrices are not relevant for them.
 
                  |    Pending      |
          Request |  scoped lock    |
@@ -2945,7 +2946,7 @@ retry:
     /*
       "Fast path".
 
-      Hurray! We are acquring "unobtrusive" type of lock and not forced
+      Hurray! We are acquiring "unobtrusive" type of lock and not forced
       to take "slow path" because of open HANDLERs.
 
       Let us do a few checks first to figure out if we really can acquire
@@ -2998,7 +2999,7 @@ retry:
         corresponds to type of our request (i.e. increment part this member
         which contains counter which corresponds to this type).
 
-        This needs to be done as atomical operation with the above checks,
+        This needs to be done as atomic operation with the above checks,
         which is achieved by using atomic compare-and-swap.
 
         @sa MDL_object_lock::m_unobtrusive_lock_increment for explanation
@@ -3163,7 +3164,7 @@ slow_path:
   vice versa -- when we COMMIT, we don't mistakenly
   release a ticket for an open HANDLER.
 
-  @retval true   An error occured.
+  @retval true   An error occurred.
   @retval false  Success.
 */
 

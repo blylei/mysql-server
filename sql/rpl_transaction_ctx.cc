@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -99,7 +99,8 @@ int set_transaction_ctx(
                        transaction_termination_ctx.m_gno));
 
   uint error = ER_NO_SUCH_THREAD;
-  Find_thd_with_id find_thd_with_id(transaction_termination_ctx.m_thread_id);
+  Find_thd_with_id find_thd_with_id(transaction_termination_ctx.m_thread_id,
+                                    true);
 
   THD_ptr thd_ptr =
       Global_THD_manager::get_instance()->find_thd(&find_thd_with_id);
@@ -107,6 +108,17 @@ int set_transaction_ctx(
     error = thd_ptr->get_transaction()
                 ->get_rpl_transaction_ctx()
                 ->set_rpl_transaction_ctx(transaction_termination_ctx);
+
+    if (!error && !transaction_termination_ctx.m_rollback_transaction) {
+      /*
+        Assign the session commit ticket while the transaction is
+        still under the control of the external transaction
+        arbitrator, thence matching the arbitrator's transactions
+        order.
+      */
+      thd_ptr->rpl_thd_ctx.binlog_group_commit_ctx().assign_ticket();
+    }
   }
+
   return error;
 }

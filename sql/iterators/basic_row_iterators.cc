@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,35 +27,28 @@
   in some way). See row_iterator.h.
 */
 
+#include "sql/iterators/basic_row_iterators.h"
+
 #include <assert.h>
 #include <atomic>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "my_alloc.h"
 #include "my_base.h"
-#include "my_dbug.h"
 #include "my_inttypes.h"
 #include "my_sys.h"
 #include "mysqld_error.h"
 #include "sql/debug_sync.h"
 #include "sql/handler.h"
-#include "sql/iterators/basic_row_iterators.h"
 #include "sql/iterators/row_iterator.h"
-#include "sql/iterators/timing_iterator.h"
-#include "sql/join_optimizer/access_path.h"
 #include "sql/mem_root_array.h"
 #include "sql/sql_bitmap.h"
 #include "sql/sql_class.h"  // THD
 #include "sql/sql_executor.h"
-#include "sql/sql_sort.h"
 #include "sql/sql_tmp_table.h"
 #include "sql/system_variables.h"
 #include "sql/table.h"
-
-struct POSITION;
 
 using std::string;
 using std::vector;
@@ -186,7 +179,9 @@ TableScanIterator::TableScanIterator(THD *thd, TABLE *table,
     : TableRowIterator(thd, table),
       m_record(table->record[0]),
       m_expected_rows(expected_rows),
-      m_examined_rows(examined_rows) {}
+      m_examined_rows(examined_rows),
+      m_limit_rows(table->set_counter() != nullptr ? table->m_limit_rows
+                                                   : HA_POS_ERROR) {}
 
 TableScanIterator::~TableScanIterator() {
   if (table()->file != nullptr) {
@@ -213,23 +208,86 @@ bool TableScanIterator::Init() {
     return true; /* purecov: inspected */
   }
 
+  m_stored_rows = 0;
+
   return false;
 }
 
 int TableScanIterator::Read() {
   int tmp;
-  while ((tmp = table()->file->ha_rnd_next(m_record))) {
-    /*
-      ha_rnd_next can return RECORD_DELETED for MyISAM when one thread is
-      reading and another deleting without locks.
-    */
-    if (tmp == HA_ERR_RECORD_DELETED && !thd()->killed) continue;
-    return HandleError(tmp);
-  }
-  if (m_examined_rows != nullptr) {
-    ++*m_examined_rows;
+  if (table()->is_union_or_table()) {
+    while ((tmp = table()->file->ha_rnd_next(m_record))) {
+      /*
+       ha_rnd_next can return RECORD_DELETED for MyISAM when one thread is
+       reading and another deleting without locks.
+       */
+      if (tmp == HA_ERR_RECORD_DELETED && !thd()->killed) continue;
+      return HandleError(tmp);
+    }
+    if (m_examined_rows != nullptr) {
+      ++*m_examined_rows;
+    }
+  } else {
+    while (true) {
+      if (m_remaining_dups == 0) {  // always initially
+        while ((tmp = table()->file->ha_rnd_next(m_record))) {
+          if (tmp == HA_ERR_RECORD_DELETED && !thd()->killed) continue;
+          return HandleError(tmp);
+        }
+        if (m_examined_rows != nullptr) {
+          ++*m_examined_rows;
+        }
+
+        // Filter out rows not qualifying for INTERSECT, EXCEPT by reading
+        // the counter.
+        const ulonglong cnt =
+            static_cast<ulonglong>(table()->set_counter()->val_int());
+        if (table()->is_except()) {
+          if (table()->is_distinct()) {
+            // EXCEPT DISTINCT: any counter value larger than one yields
+            // exactly one row
+            if (cnt >= 1) break;
+          } else {
+            // EXCEPT ALL: we use m_remaining_dups to yield as many rows
+            // as found in the counter.
+            m_remaining_dups = cnt;
+          }
+        } else {
+          // INTERSECT
+          if (table()->is_distinct()) {
+            if (cnt == 0) break;
+          } else {
+            HalfCounter c(cnt);
+            // Use min(left side counter, right side counter)
+            m_remaining_dups = std::min(c[0], c[1]);
+          }
+        }
+      } else {
+        --m_remaining_dups;  // return the same row once more.
+        break;
+      }
+      // Skipping this row
+    }
+    if (++m_stored_rows > m_limit_rows) {
+      return HandleError(HA_ERR_END_OF_FILE);
+    }
   }
   return 0;
+}
+
+ZeroRowsIterator::ZeroRowsIterator(THD *thd,
+                                   Mem_root_array<TABLE *> pruned_tables)
+    : RowIterator(thd), m_pruned_tables(std::move(pruned_tables)) {}
+
+void ZeroRowsIterator::SetNullRowFlag(bool is_null_row) {
+  assert(!m_pruned_tables.empty());
+  for (TABLE *table : m_pruned_tables) {
+    if (is_null_row) {
+      table->set_null_row();
+    } else {
+      table->reset_null_row();
+    }
+  }
 }
 
 FollowTailIterator::FollowTailIterator(THD *thd, TABLE *table,

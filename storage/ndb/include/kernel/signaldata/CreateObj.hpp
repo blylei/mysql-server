@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2005, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2005, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,11 +34,11 @@
 /**
  * CreateObj
  *
- * Implemenatation of CreateObj
+ * Implementation of CreateObj
  */
 struct CreateObjReq {
   /**
-   * Sender(s) / Reciver(s)
+   * Sender(s) / Receiver(s)
    */
   friend class Dbdict;
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -35,7 +35,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 @@global.log_error_filter_rules= DEFAULT", "err_symbol" : "ER_PARSER_TRACE",
 "label" : "Note" } { "prio" : 2, "err_code" : 3581, "subsystem" : "parser",
 "SQL_state" : "XX999", "source_file" : "sql_parse", "function" :
-"dispatch_command", "msg" : "Parser saw: SELECT \"loging as traditional MySQL
+"dispatch_command", "msg" : "Parser saw: SELECT \"logging as traditional MySQL
 error log and as JSON\"", "time" : "1970-01-01T00:00:00.000000Z", "thread" : 0,
 "err_symbol" : "ER_PARSER_TRACE", "label" : "Note" }
 */
@@ -459,7 +459,7 @@ DEFINE_METHOD(log_service_error, log_service_imp::get_log_name,
   Open a new instance.
 
   @retval  <0        a new instance could not be created
-  @retval  =0        success, returned hande is valid
+  @retval  =0        success, returned handle is valid
 */
 DEFINE_METHOD(log_service_error, log_service_imp::open,
               (log_line * ll [[maybe_unused]], void **instance)) {

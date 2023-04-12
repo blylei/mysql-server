@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -338,6 +338,35 @@ static bool skip_own_peer_address(
   return false;
 }
 
+static constexpr const char *get_signaling_error() {
+  return "The group communication engine could not set up its internal event "
+         "notification mechanism. This may be due to one or more invalid "
+         "configuration settings. Double-check your group replication local "
+         "address, firewall"
+#if !defined(_WIN32)
+         ", SE Linux"
+#endif
+         " and TLS configurations and try "
+         "restarting Group Replication on this server.";
+}
+
+static const std::string get_connection_test_error(const std::string &address,
+                                                   int port) {
+  std::stringstream retval;
+  retval << "The group communication engine failed to test connectivity to the "
+            "local group communication engine on "
+         << address << ":" << port
+         << ". This may be due to one or more invalid configuration settings. "
+            "Double-check your group replication local address, firewall";
+#if !defined(_WIN32)
+  retval << ", SE Linux";
+#endif
+  retval << " and TLS configurations and try restarting Group Replication on "
+            "this server.";
+
+  return retval.str();
+}
+
 enum_gcs_error Gcs_xcom_control::retry_do_join() {
   /* Used to initialize xcom */
   int local_port = m_local_node_address->get_member_port();
@@ -383,8 +412,7 @@ enum_gcs_error Gcs_xcom_control::retry_do_join() {
      * Tested by the TEST_F(XComControlTest,
      * JoinTestFailedToConnectToXComQueueSignallingMechanism) GCS smoke test.
      */
-    MYSQL_GCS_LOG_ERROR("Error connecting to the local group communication"
-                        << " engine instance.")
+    MYSQL_GCS_LOG_ERROR(get_signaling_error());
     goto err;
     /* purecov: end */
   }
@@ -403,8 +431,10 @@ enum_gcs_error Gcs_xcom_control::retry_do_join() {
       m_local_node_address->get_member_ip(),
       m_local_node_address->get_member_port());
   if (!could_connect_to_local_xcom) {
-    MYSQL_GCS_LOG_ERROR("Error testing to the local group communication"
-                        << " engine instance.")
+    MYSQL_GCS_LOG_ERROR(
+        get_connection_test_error(m_local_node_address->get_member_ip(),
+                                  m_local_node_address->get_member_port())
+            .c_str());
     goto err;
   }
 
@@ -511,6 +541,7 @@ bool Gcs_xcom_control::send_add_node_request(
   // Go through the seed list S_CONNECTION_ATTEMPTS times.
   for (int attempt_nr = 0;
        !add_node_accepted && attempt_nr < CONNECTION_ATTEMPTS; attempt_nr++) {
+    if (m_view_control->is_finalized()) break;
     add_node_accepted = try_send_add_node_request_to_seeds(my_addresses);
   }
 
@@ -530,6 +561,8 @@ bool Gcs_xcom_control::try_send_add_node_request_to_seeds(
     bool connected = false;
     connection_descriptor *con = nullptr;
     std::tie(connected, con) = connect_to_peer(peer, my_addresses);
+
+    if (m_view_control->is_finalized()) break;
 
     if (connected) {
       MYSQL_GCS_LOG_INFO("Sucessfully connected to peer "
@@ -1151,7 +1184,7 @@ bool Gcs_xcom_control::xcom_receive_local_view(synode_no const config_id,
       Identify which nodes are alive and which are considered faulty.
 
       Note that there may be new nodes that are marked as faulty because the
-      connections among their peers are still beeing established.
+      connections among their peers are still being established.
     */
     build_total_members(xcom_nodes, alive_members, failed_members);
 
@@ -1368,7 +1401,7 @@ bool Gcs_xcom_control::xcom_receive_global_view(synode_no const config_id,
     Identify which nodes are alive and which are considered faulty.
 
     Note that there may be new nodes that are marked as faulty because the
-    connections among their peers are still beeing established.
+    connections among their peers are still being established.
   */
   build_total_members(xcom_nodes, alive_members, failed_members);
 

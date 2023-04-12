@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2021, Oracle and/or its affiliates.
+Copyright (c) 1997, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -45,8 +45,8 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "ut0vec.h"
 
 /** Create a purge node to a query graph.
-@param[in]	parent	parent node, i.e., a thr node
-@param[in]	heap	memory heap where created
+@param[in]      parent  parent node, i.e., a thr node
+@param[in]      heap    memory heap where created
 @return own: purge node */
 [[nodiscard]] purge_node_t *row_purge_node_create(que_thr_t *parent,
                                                   mem_heap_t *heap);
@@ -173,6 +173,10 @@ struct purge_node_t {
   Recs *recs;
 
   void init() { new (&m_lob_pages) LOB_free_set(); }
+  void deinit() {
+    mem_heap_free(heap);
+    m_lob_pages.~LOB_free_set();
+  }
 
   /** Add an LOB page to the list of pages that will be freed at the end of a
   purge batch.
@@ -185,7 +189,7 @@ struct purge_node_t {
   void free_lob_pages();
 
   /** Check if undo records of given table_id is there in this purge node.
-  @param[in]	table_id	look for undo records of this table id.
+  @param[in]    table_id        look for undo records of this table id.
   @return true if undo records of table id exists, false otherwise. */
   bool is_table_id_exists(table_id_t table_id) const;
 
@@ -198,7 +202,7 @@ struct purge_node_t {
 
   trx_rseg_t *rseg;
 #ifdef UNIV_DEBUG
-  /**   Validate the persisent cursor. The purge node has two references
+  /**   Validate the persistent cursor. The purge node has two references
      to the clustered index record - one via the ref member, and the
      other via the persistent cursor.  These two references must match
      each other if the found_clust flag is set.

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -267,7 +267,8 @@ class Applier_module_interface {
       Leaving_members_action_packet *packet) = 0;
   virtual int handle(const uchar *data, ulong len,
                      enum_group_replication_consistency_level consistency_level,
-                     std::list<Gcs_member_identifier> *online_members) = 0;
+                     std::list<Gcs_member_identifier> *online_members,
+                     PSI_memory_key key) = 0;
   virtual int handle_pipeline_action(Pipeline_action *action) = 0;
   virtual Flow_control_module *get_flow_control_module() = 0;
   virtual void run_flow_control_step() = 0;
@@ -381,6 +382,7 @@ class Applier_module : public Applier_module_interface {
     @param[in]  consistency_level  the transaction consistency level
     @param[in]  online_members     the ONLINE members when the transaction
                                    message was delivered
+    @param[in]  key       the memory instrument key
 
     @return the operation status
       @retval 0      OK
@@ -388,9 +390,10 @@ class Applier_module : public Applier_module_interface {
   */
   int handle(const uchar *data, ulong len,
              enum_group_replication_consistency_level consistency_level,
-             std::list<Gcs_member_identifier> *online_members) override {
+             std::list<Gcs_member_identifier> *online_members,
+             PSI_memory_key key) override {
     this->incoming->push(
-        new Data_packet(data, len, consistency_level, online_members));
+        new Data_packet(data, len, key, consistency_level, online_members));
     return 0;
   }
 
@@ -450,6 +453,18 @@ class Applier_module : public Applier_module_interface {
    This method informs the applier module that an applying thread stopped
   */
   void inform_of_applier_stop(char *channel_name, bool aborted);
+
+  /**
+   Check whether to ignore applier errors during stop or not.
+   Errors put the members into ERROR state.
+   If errors are ignored member will stay in ONLINE state.
+   During clone, applier errors are ignored, since data will come from clone.
+
+    @param[in]  ignore_errors  if true ignore applier errors during stop
+  */
+  void ignore_errors_during_stop(bool ignore_errors) {
+    m_ignore_applier_errors_during_stop = ignore_errors;
+  }
 
   // Packet based interface methods
 
@@ -870,6 +885,8 @@ class Applier_module : public Applier_module_interface {
   int applier_error;
   /* Applier killed status */
   bool applier_killed_status;
+  /* Ignore applier errors during stop. */
+  bool m_ignore_applier_errors_during_stop{false};
 
   // condition and lock used to suspend/awake the applier module
   /* The lock for suspending/wait for the awake of  the applier module */

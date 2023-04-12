@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -65,6 +65,9 @@ private:
   Uint32 config[DataLength];
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_STTOR, Local);
+DECLARE_SIGNAL_SCOPE(GSN_NDB_STTOR, Local);
+
 class NdbSttorry {
   /**
    * Receiver(s)
@@ -93,6 +96,8 @@ private:
   Uint32 senderRef;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_STTORRY, Local);
+DECLARE_SIGNAL_SCOPE(GSN_NDB_STTORRY, Local);
 
 #undef JAM_FILE_ID
 

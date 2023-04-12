@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2013, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include <cstring>
 #include <NDBT.hpp>
 #include <NDBT_Test.hpp>
@@ -1439,7 +1440,7 @@ runAbortWithSlowChildScans(NDBT_Context* ctx, NDBT_Step* step)
   restarter.insertErrorInAllNodes(8109);
 
   /* Now perform delete of parent rows in a separate connection
-   * Separate connection used as some validation is perfomed by
+   * Separate connection used as some validation is performed by
    * TC at connection close time (TCRELEASEREQ)
    */
   

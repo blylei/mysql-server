@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -78,7 +78,7 @@ class Gcs_control_event_listener {
 
   /**
     This member function is called when the set of suspicions
-    has changed in the underlaying communication infrastructure.
+    has changed in the underlying communication infrastructure.
 
     @param[in] members Contains the list of all members that are in the
                        current view.

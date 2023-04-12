@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -98,6 +98,7 @@ Table::Table(TABLE *mysql_table, Block *shared_block,
 
   if (m_all_columns_are_fixed_size) {
     m_rows.element_size(m_mysql_row_length);
+    assert(m_rows.number_of_elements_per_page() > 0);
   } else {
     m_rows.element_size(sizeof(Row));
   }

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -232,7 +232,7 @@ TEST(NetTS_impl_resolver, getaddrinfo_numerichost_ipv4_mapped_ipv6) {
   ASSERT_NE(ainfo, nullptr);
 
   // solaris: AF_INET
-  // ohters: AF_INET6
+  // others: AF_INET6
   EXPECT_THAT(ainfo->ai_family, ::testing::AnyOf(AF_INET6, AF_INET));
   ASSERT_EQ(ainfo->ai_addr->sa_family, ainfo->ai_family);
 }

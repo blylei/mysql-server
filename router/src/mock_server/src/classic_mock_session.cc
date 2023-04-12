@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -35,6 +35,7 @@
 
 #include <openssl/ssl.h>
 
+#include "hexify.h"
 #include "mysql/harness/logging/logging.h"
 #include "mysql/harness/net_ts/buffer.h"
 #include "mysql/harness/net_ts/impl/socket_constants.h"
@@ -44,8 +45,10 @@
 #include "mysqld_error.h"
 #include "mysqlrouter/classic_protocol.h"
 #include "mysqlrouter/classic_protocol_codec_error.h"
+#include "mysqlrouter/classic_protocol_codec_session_track.h"
 #include "mysqlrouter/classic_protocol_constants.h"
 #include "mysqlrouter/classic_protocol_message.h"
+#include "mysqlrouter/classic_protocol_session_track.h"
 #include "router/src/mock_server/src/statement_reader.h"
 
 IMPORT_LOG_FUNCTIONS()
@@ -315,14 +318,34 @@ void MySQLServerMockSessionClassic::client_greeting() {
       return;
     }
   } else {
-    log_error("unsupported auth method: %s",
-              protocol_.auth_method_name().c_str());
-    protocol_.encode_error(
-        {ER_ACCESS_DENIED_ERROR,  // 1045
-         "Access Denied for user '" + protocol_.username() + "'@'localhost'",
-         "28000"});
+    // switch to something we know.
+    protocol_.auth_method_name("caching_sha2_password");
 
-    send_response_then_disconnect();
+    // ask for the real full authentication
+    protocol_.auth_method_data(std::string(20, 'a'));
+
+    protocol_.encode_auth_switch_message(
+        {protocol_.auth_method_name(),
+         protocol_.auth_method_data() + std::string(1, '\0')});
+
+    protocol_.async_send([this, to_send = protocol_.send_buffer().size()](
+                             std::error_code ec, size_t transferred) {
+      if (ec) {
+        if (ec != std::errc::operation_canceled) {
+          log_warning("send auto result failed: %s", ec.message().c_str());
+        }
+
+        disconnect();
+        return;
+      }
+
+      if (to_send < transferred) {
+        std::terminate();
+      } else {
+        auth_switched();
+      }
+    });
+    return;
   }
 }
 
@@ -533,6 +556,13 @@ void MySQLServerMockSessionClassic::idle() {
       });
 
       return;
+    case classic_protocol::Codec<
+        classic_protocol::message::client::ResetConnection>::cmd_byte():
+
+      protocol_.encode_ok();
+
+      send_response_then_idle();
+      break;
     default:
       log_info("received unsupported command from the client: %d", cmd);
 
@@ -686,6 +716,76 @@ void MySQLClassicProtocol::encode_error(const ErrorResponse &msg) {
   }
 }
 
+template <class T>
+constexpr uint8_t type_byte() {
+  return classic_protocol::Codec<T>::type_byte();
+}
+
+static std::string encode_session_trackers(const MySQLClassicProtocol &conn) {
+  const auto shared_caps = conn.shared_capabilities();
+
+  std::string session_changes{};
+
+  if (!shared_caps.test(classic_protocol::capabilities::pos::session_track))
+    return {};
+  std::string session_change{};
+  std::string track_field{};
+
+  auto encode_res = classic_protocol::encode(
+      classic_protocol::session_track::TransactionCharacteristics{""},
+      shared_caps, net::dynamic_buffer(track_field));
+  if (!encode_res) {
+    //
+    return {};
+  }
+
+  encode_res = classic_protocol::encode(
+      classic_protocol::session_track::Field{
+          type_byte<
+              classic_protocol::session_track::TransactionCharacteristics>(),
+          track_field},
+      shared_caps, net::dynamic_buffer(session_change));
+  if (!encode_res) {
+    //
+    return {};
+  }
+
+  session_changes += session_change;
+
+  std::array<std::pair<std::string, std::string>, 4> sys_vars = {
+      std::make_pair("session_track_gtids", "OWN_GTID"),
+      std::make_pair("session_track_state_change", "ON"),
+      std::make_pair("session_track_system_variables", "*"),
+      std::make_pair("session_track_transaction_info", "CHARACTERISTICS"),
+  };
+  for (const auto &kv : sys_vars) {
+    std::string session_change{};
+    std::string track_field{};
+
+    encode_res = classic_protocol::encode(
+        classic_protocol::session_track::SystemVariable{kv.first, kv.second},
+        shared_caps, net::dynamic_buffer(track_field));
+    if (!encode_res) {
+      //
+      return {};
+    }
+
+    encode_res = classic_protocol::encode(
+        classic_protocol::session_track::Field{
+            type_byte<classic_protocol::session_track::SystemVariable>(),
+            track_field},
+        shared_caps, net::dynamic_buffer(session_change));
+    if (!encode_res) {
+      //
+      return {};
+    }
+
+    session_changes += session_change;
+  }
+
+  return session_changes;
+}
+
 void MySQLClassicProtocol::encode_ok(const uint64_t affected_rows,
                                      const uint64_t last_insert_id,
                                      const uint16_t server_status,
@@ -693,7 +793,11 @@ void MySQLClassicProtocol::encode_ok(const uint64_t affected_rows,
   auto encode_res = classic_protocol::encode<
       classic_protocol::frame::Frame<classic_protocol::message::server::Ok>>(
       {seq_no_++,
-       {affected_rows, last_insert_id, server_status, warning_count}},
+       {affected_rows, last_insert_id, server_status, warning_count, "",
+        (server_status &
+         (1 << classic_protocol::status::pos::session_state_changed))
+            ? encode_session_trackers(*this)
+            : ""}},
       shared_capabilities(), net::dynamic_buffer(send_buffer_));
 
   if (!encode_res) {
@@ -745,9 +849,18 @@ void MySQLClassicProtocol::encode_resultset(const ResultsetResponse &response) {
     }
   }
 
+  classic_protocol::status::value_type status{
+      shared_caps.test(classic_protocol::capabilities::pos::session_track)
+          ? classic_protocol::status::session_state_changed
+          : 0};
+  uint16_t warning_count{};
+  std::string message{};
+
   encode_res = classic_protocol::encode<
       classic_protocol::frame::Frame<classic_protocol::message::server::Eof>>(
-      {seq_no_++, {}}, shared_caps, net::dynamic_buffer(send_buffer_));
+      {seq_no_++,
+       {status, warning_count, message, encode_session_trackers(*this)}},
+      shared_caps, net::dynamic_buffer(send_buffer_));
   if (!encode_res) {
     //
     return;

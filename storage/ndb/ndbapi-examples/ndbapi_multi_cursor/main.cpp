@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2008, 2022, Oracle and/or its affiliates.
    Use is subject to license terms.
 
    This program is free software; you can redistribute it and/or modify
@@ -483,7 +483,7 @@ int testQueryBuilder(Ndb &myNdb)
 
     // THEN: employee table is joined:
     //    A linked value is used to let employee lookup refer values
-    //    from the parent operation on manger.
+    //    from the parent operation on manager.
 
     const NdbQueryOperand* joinEmployeeKey[] =       // Employee is indexed om {"emp_no"}
     {  qb->linkedValue(readManager, "emp_no"),  // where '= readManger.emp_no'

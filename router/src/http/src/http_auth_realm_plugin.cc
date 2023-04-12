@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -56,6 +56,7 @@
 #include "mysqlrouter/http_auth_backend_component.h"
 #include "mysqlrouter/http_auth_realm_component.h"
 #include "mysqlrouter/http_auth_realm_export.h"
+#include "mysqlrouter/supported_http_options.h"
 
 IMPORT_LOG_FUNCTIONS()
 
@@ -63,6 +64,13 @@ using namespace std::string_literals;
 
 static constexpr const char kSectionName[]{"http_auth_realm"};
 static std::vector<std::string> registered_realms;
+
+using StringOption = mysql_harness::StringOption;
+
+#define GET_OPTION_CHECKED(option, section, name, value) \
+  static_assert(mysql_harness::str_in_collection(        \
+      http_auth_realm_suported_options, name));          \
+  option = get_option(section, name, value);
 
 class HttpAuthRealmPluginConfig : public mysql_harness::BasePluginConfig {
  public:
@@ -73,11 +81,12 @@ class HttpAuthRealmPluginConfig : public mysql_harness::BasePluginConfig {
 
   explicit HttpAuthRealmPluginConfig(
       const mysql_harness::ConfigSection *section)
-      : mysql_harness::BasePluginConfig(section),
-        backend(get_option_string(section, "backend")),
-        method(get_option_string(section, "method")),
-        require(get_option_string(section, "require")),
-        name(get_option_string(section, "name")) {}
+      : mysql_harness::BasePluginConfig(section) {
+    GET_OPTION_CHECKED(backend, section, "backend", StringOption{});
+    GET_OPTION_CHECKED(method, section, "method", StringOption{});
+    GET_OPTION_CHECKED(require, section, "require", StringOption{});
+    GET_OPTION_CHECKED(name, section, "name", StringOption{});
+  }
 
   std::string get_default(const std::string &option) const override {
     const std::map<std::string, std::string> defaults{
@@ -197,13 +206,17 @@ mysql_harness::Plugin HTTP_AUTH_REALM_EXPORT harness_plugin_http_auth_realm = {
     "HTTP_AUTH_REALM",                       // name
     VERSION_NUMBER(0, 0, 1),
     // requires
-    required.size(), required.data(),
+    required.size(),
+    required.data(),
     // conflicts
-    0, nullptr,
+    0,
+    nullptr,
     init,     // init
     deinit,   // deinit
     nullptr,  // start
     nullptr,  // stop
     false,    // declares_readiness
+    http_auth_realm_suported_options.size(),
+    http_auth_realm_suported_options.data(),
 };
 }

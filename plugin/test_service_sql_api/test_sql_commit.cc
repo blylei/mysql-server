@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -164,9 +164,8 @@ static int sql_start_result_metadata(void *ctx, uint num_cols, uint,
   struct st_plugin_ctx *pctx = (struct st_plugin_ctx *)ctx;
   DBUG_TRACE;
   DBUG_PRINT("info", ("resultcs->number: %d", resultcs->number));
-  DBUG_PRINT("info",
-             ("resultcs->csname: %s", replace_utf8_utf8mb3(resultcs->csname)));
-  DBUG_PRINT("info", ("resultcs->name: %s", resultcs->name));
+  DBUG_PRINT("info", ("resultcs->csname: %s", resultcs->csname));
+  DBUG_PRINT("info", ("resultcs->m_coll_name: %s", resultcs->m_coll_name));
   pctx->num_cols = num_cols;
   pctx->resultcs = resultcs;
   pctx->current_col = 0;
@@ -549,9 +548,8 @@ static void dump_cs_info(const CHARSET_INFO *cs) {
   }
 
   WRITE_VAL("\t\t[meta][charset result] number: %d\n", cs->number);
-  WRITE_VAL("\t\t[meta][charset result] name: %s\n",
-            replace_utf8_utf8mb3(cs->csname));
-  WRITE_VAL("\t\t[meta][charset result] collation: %s\n", cs->name);
+  WRITE_VAL("\t\t[meta][charset result] name: %s\n", cs->csname);
+  WRITE_VAL("\t\t[meta][charset result] collation: %s\n", cs->m_coll_name);
   WRITE_VAL("\t\t[meta][charset result] sort order: %s\n", cs->sort_order);
 }
 
@@ -688,7 +686,7 @@ again:
   ctx->reset();
   WRITE_STR("[protocol init]\n");
   int fail = command_service_run_command(session, COM_QUERY, &cmd,
-                                         &my_charset_utf8_general_ci,
+                                         &my_charset_utf8mb3_general_ci,
                                          &protocol_callbacks, txt_or_bin, ctx);
   if (fail) {
     LogPluginErrMsg(ERROR_LEVEL, ER_LOG_PRINTF_MSG, "run_statement code: %d\n",
@@ -723,7 +721,7 @@ void static change_current_db(MYSQL_SESSION session, const char *db,
   WRITE_DASHED_LINE();
   WRITE_VAL("EXECUTING:[COM_INIT_DB][%s]\n", db);
   int fail = command_service_run_command(
-      session, COM_INIT_DB, &cmd, &my_charset_utf8_general_ci,
+      session, COM_INIT_DB, &cmd, &my_charset_utf8mb3_general_ci,
       &protocol_callbacks, CS_TEXT_REPRESENTATION, ctx);
   if (fail)
     LogPluginErrMsg(ERROR_LEVEL, ER_LOG_PRINTF_MSG, "change db code: %d\n",

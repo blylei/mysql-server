@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -76,7 +76,8 @@ public:
   NdbMutex* m_query_mutex;
   NdbEventOperation* m_eventOp;
   Mem* m_mem_handler;
-  NdbIndexStat::Error m_error;
+  // Allow update error from const methods
+  mutable NdbIndexStat::Error m_error;
 
   // sys tables meta
   struct Sys {
@@ -375,9 +376,9 @@ NdbIndexStatImpl::StatBound::StatBound()
 inline
 NdbIndexStatImpl::Stat::Stat()
 {
-  m_rule[0] = 0;
-  m_rule[1] = 0;
-  m_rule[2] = 0;
+  m_rule[0] = nullptr;
+  m_rule[1] = nullptr;
+  m_rule[2] = nullptr;
 }
  
 #endif

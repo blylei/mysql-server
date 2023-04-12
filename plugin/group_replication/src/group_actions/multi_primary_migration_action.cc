@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -21,11 +21,11 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "plugin/group_replication/include/group_actions/multi_primary_migration_action.h"
-#include <plugin/group_replication/include/plugin_handlers/persistent_variables_handler.h>
 #include "plugin/group_replication/include/mysql_version_gcs_protocol_map.h"
 #include "plugin/group_replication/include/plugin.h"
 #include "plugin/group_replication/include/plugin_handlers/consensus_leaders_handler.h"
 #include "plugin/group_replication/include/plugin_handlers/server_ongoing_transactions_handler.h"
+#include "plugin/group_replication/include/services/system_variable/set_system_variable.h"
 
 bool send_multi_primary_action_message(Plugin_gcs_message *message) {
   enum_gcs_error msg_error = gcs_module->send_message(*message);
@@ -202,7 +202,7 @@ Multi_primary_migration_action::execute_action(
               local_member_info->get_member_version(),
               group_member_mgr->get_group_lowest_online_version()) ==
           READ_COMPATIBLE) {
-        if (enable_server_read_mode(PSESSION_USE_THREAD)) {
+        if (enable_server_read_mode()) {
           /* purecov: begin inspected */
           LogPluginErr(WARNING_LEVEL, ER_GRP_RPL_ENABLE_READ_ONLY_FAILED);
           /* purecov: end */
@@ -272,10 +272,6 @@ bool Multi_primary_migration_action::stop_action_execution(bool killed) {
   return false;
 }
 
-const char *Multi_primary_migration_action::get_action_name() {
-  return "Multi primary mode migration";
-}
-
 Group_action_diagnostics *Multi_primary_migration_action::get_execution_info() {
   return &execution_message_area;
 }
@@ -314,7 +310,8 @@ int Multi_primary_migration_action::after_view_change(
 }
 
 int Multi_primary_migration_action::after_primary_election(
-    std::string, bool, enum_primary_election_mode, int) {
+    std::string, enum_primary_election_primary_change_status,
+    enum_primary_election_mode, int) {
   return 0; /* purecov: inspected */
 }
 
@@ -344,31 +341,23 @@ int Multi_primary_migration_action::before_message_handling(
 }
 
 bool Multi_primary_migration_action::persist_variable_values() {
-  Sql_service_command_interface *sql_command_interface =
-      new Sql_service_command_interface();
-  long error = 0;
-  std::string var_name, var_value;
+  int error = 0;
+  Set_system_variable set_system_variable;
 
-  if ((error = sql_command_interface->establish_session_connection(
-           PSESSION_USE_THREAD, GROUPREPL_USER, get_plugin_pointer())))
+  if ((error = set_system_variable
+                   .set_persist_only_group_replication_single_primary_mode(
+                       false))) {
     goto end; /* purecov: inspected */
+  }
 
-  var_name.assign("group_replication_single_primary_mode");
-  var_value.assign("OFF");
-
-  if ((error = set_persist_only_variable(var_name, var_value,
-                                         sql_command_interface)))
+  if ((error =
+           set_system_variable
+               .set_persist_only_group_replication_enforce_update_everywhere_checks(
+                   true))) {
     goto end; /* purecov: inspected */
-
-  var_name.assign("group_replication_enforce_update_everywhere_checks");
-  var_value.assign("ON");
-
-  if ((error = set_persist_only_variable(var_name, var_value,
-                                         sql_command_interface)))
-    goto end; /* purecov: inspected */
+  }
 
 end:
-  delete sql_command_interface;
   if (error) {
     execution_message_area.set_warning_message(
         "It was not possible to persist the configuration values for this "

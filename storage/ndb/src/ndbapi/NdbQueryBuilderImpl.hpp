@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,7 +56,8 @@
 #define QRY_OJ_NOT_SUPPORTED 4827
 //#define QRY_NEST_NOT_SPECIFIED 4828  <<== DEPRECATED
 #define QRY_NEST_NOT_SUPPORTED 4829
-
+#define QRY_TABLE_HAVE_NO_FRAGMENTS 4830
+#define QRY_BAD_FRAGMENT_DATA 4831
 
 #include <Vector.hpp>
 #include <Bitmask.hpp>
@@ -82,9 +83,9 @@ class NdbLinkedOperandImpl;
 
 /** A buffer for holding serialized data.
  *
- *  Data is normaly appended to the end of this buffer by several variants
+ *  Data is normally appended to the end of this buffer by several variants
  *  of ::append(). A chunk of memory may also be allocated (at end of buffer)
- *  with ::alloc(). The buffer has a small local storage likely to be sufficent
+ *  with ::alloc(). The buffer has a small local storage likely to be sufficient
  *  for most buffer usage. If required it will allocate a buffer extension to
  *  satisfy larger buffer requests.
  *
@@ -108,7 +109,7 @@ public:
 #if defined(TEST_Uint32Buffer)
   static constexpr Uint32 initSize = 1;  // Small size to force test of buffer expand.
 #else
-  static constexpr Uint32 initSize = 32; // Initial buffer size, extend on demand but probably sufficent
+  static constexpr Uint32 initSize = 32; // Initial buffer size, extend on demand but probably sufficient
 #endif
 
   explicit Uint32Buffer():
@@ -132,7 +133,7 @@ public:
     if (unlikely(m_array != m_local)) {
       delete[] m_array;
     }
-    m_array = NULL;
+    m_array = nullptr;
     m_size = 0;
   }
 
@@ -146,7 +147,7 @@ public:
     Uint32 reqSize = m_size+count;
     if(unlikely(reqSize >= m_avail)) {
       if (unlikely(m_memoryExhausted)) {
-        return NULL;
+        return nullptr;
       }
 #if defined(TEST_Uint32Buffer)
       Uint32 newSize = reqSize; // -> Always expand on next alloc
@@ -156,7 +157,7 @@ public:
 //    ndbout << "Uint32Buffer::alloc() Extend buffer from: " << m_avail
 //           << ", to: " << newSize << endl;
       Uint32* newBuf = new Uint32[newSize];
-      if (likely(newBuf!=NULL)) {
+      if (likely(newBuf!=nullptr)) {
         assert(newBuf);
         memcpy (newBuf, m_array, m_size*sizeof(Uint32));
         if (m_array != m_local) {
@@ -167,7 +168,7 @@ public:
       } else {
         m_size = m_avail;
         m_memoryExhausted = true;
-        return NULL;
+        return nullptr;
       }
     }
     Uint32* extend = &m_array[m_size];
@@ -190,7 +191,7 @@ public:
       m_array[m_size++] = src;
     } else {
       Uint32* dst = alloc(1);
-      if (likely(dst!=NULL))
+      if (likely(dst!=nullptr))
         *dst = src;
     }
   }
@@ -203,7 +204,7 @@ public:
     Uint32 len = src.getSize();
     if (likely(len > 0)) {
       Uint32* dst = alloc(len);
-      if (likely(dst!=NULL)) {
+      if (likely(dst!=nullptr)) {
         memcpy(dst, src.addr(), len*sizeof(Uint32));
       }
     }
@@ -218,7 +219,7 @@ public:
         static_cast<Uint32>((len + sizeof(Uint32)-1 - m_bytesLeft) 
                             / sizeof(Uint32));
       Uint32* dst = alloc(wordCount);
-      if (likely(dst!=NULL)) {
+      if (likely(dst!=nullptr)) {
         // Copy src 
         Uint8* const start = reinterpret_cast<Uint8*>(dst) - m_bytesLeft;
         memcpy(start, src, len);
@@ -235,10 +236,10 @@ public:
   { m_bytesLeft = 0; }
 
   Uint32* addr(Uint32 idx=0) {
-    return (likely(!m_memoryExhausted && m_size>idx)) ?&m_array[idx] :NULL;
+    return (likely(!m_memoryExhausted && m_size>idx)) ?&m_array[idx] :nullptr;
   }
   const Uint32* addr(Uint32 idx=0) const {
-    return (likely(!m_memoryExhausted && m_size>idx)) ?&m_array[idx] :NULL;
+    return (likely(!m_memoryExhausted && m_size>idx)) ?&m_array[idx] :nullptr;
   }
 
   /** Get the idx'th element. Make sure there is space for 'count' elements.*/
@@ -265,7 +266,7 @@ private:
   Uint32  m_local[initSize]; // Initial static bufferspace
   Uint32* m_array;           // Refers m_local initially, or extended large buffer
   Uint32  m_avail;           // Available buffer space
-  Uint32  m_size;            // Actuall size <= m_avail
+  Uint32  m_size;            // Actual size <= m_avail
   bool m_memoryExhausted;
   /** Number of remaining bytes (0-3) in m_array[m_size-1].*/
   Uint32 m_bytesLeft;
@@ -335,8 +336,9 @@ public:
   Uint32 getNoOfParentOperations() const
   { return (m_parent) ? 1 : 0; }
 
-  const NdbQueryOperationDefImpl& getParentOperation(Uint32 i) const
-  { assert(i==0 && m_parent!=NULL);
+  const NdbQueryOperationDefImpl& getParentOperation(Uint32 i
+                                                     [[maybe_unused]]) const
+  { assert(i==0 && m_parent!=nullptr);
     return *m_parent;
   }
 
@@ -402,14 +404,14 @@ public:
    * Register a linked reference to a column from operation
    * @param[in] column Column to refer.
    * @param[out] error Possible error code.
-   * @return position in list of refered columns available from
+   * @return position in list of referred columns available from
    * this (parent) operation. Child ops later refer linked 
    * columns by its position in this list.
    */
   Uint32 addColumnRef(const NdbColumnImpl* column, int& error);
 
   /** 
-   * Register a param operand which is refered by this operation.
+   * Register a param operand which is referred by this operation.
    * Param values are supplied pr. operation when code is serialized.
    * @param[in] param Parameter to add.
    * @return Possible error code.
@@ -423,13 +425,13 @@ public:
   { return *m_params[ix]; }
 
   virtual const NdbIndexImpl* getIndex() const
-  { return NULL; }
+  { return nullptr; }
 
   virtual const NdbQueryOperandImpl* const* getKeyOperands() const
-  { return NULL; } 
+  { return nullptr; } 
 
   virtual const IndexBound* getBounds() const
-  { return NULL; } 
+  { return nullptr; } 
 
   /** 
    * True if this is a prunable scan and there are NdbQueryParamOperands in the
@@ -459,10 +461,10 @@ public:
     return m_spjProjection;
   }
 
-  virtual int checkPrunable(const Uint32Buffer& keyInfo,
-                            Uint32  shortestBound,
-                            bool&   isPruned,
-			    Uint32& hashValue) const {
+  virtual int checkPrunable(const Uint32Buffer& /*keyInfo*/,
+                            Uint32 /*shortestBound*/, bool& isPruned,
+                            Uint32& /*hashValue*/) const
+  {
     isPruned = false;
     return 0;
   }
@@ -527,18 +529,18 @@ private:
   bool isChildOf(const NdbQueryOperationDefImpl* parentOp) const;
 
   /**
-   * Register a linked child refering specified operation
+   * Register a linked child referring specified operation
    * @param[in] child Child operation to add.
    * @return Possible error code.
    */
   int addChild(NdbQueryOperationDefImpl* child);
 
-  // Remove a linked child refering specified operation
+  // Remove a linked child referring specified operation
   void removeChild(const NdbQueryOperationDefImpl*);
 
 private:
   const NdbTableImpl& m_table;
-  const char* const m_ident; // Optional name specified by aplication
+  const char* const m_ident; // Optional name specified by application
   const Uint32 m_opNo;       // Index of this operation within operation array
   const Uint32 m_internalOpNo;// Operation id when materialized into queryTree.
                           // If op has index, index opNo is 'm_internalOpNo-1'.
@@ -588,11 +590,11 @@ protected:
                 Uint32Buffer& serializedDef,
                 const NdbTableImpl& tableOrIndex);
 
-  // Append pattern for creating complete range bounds to serialized code 
-  virtual Uint32 appendBoundPattern(Uint32Buffer& serializedDef) const
+  // Append pattern for creating complete range bounds to serialized code
+  virtual Uint32 appendBoundPattern(Uint32Buffer& /*serializedDef*/) const
   { return 0; }
 
-  virtual Uint32 appendPrunePattern(Uint32Buffer& serializedDef)
+  virtual Uint32 appendPrunePattern(Uint32Buffer& /*serializedDef*/)
   { return 0; }
 
 }; // class NdbQueryScanOperationDefImpl
@@ -755,7 +757,7 @@ private:
 
   bool contains(const NdbQueryOperationDefImpl*);
 
-  // Get interal operation number of the next operation.
+  // Get internal operation number of the next operation.
   Uint32 getNextInternalOpNo() const
   { 
     return m_operations.size() == 0 ? 0 :
@@ -763,7 +765,8 @@ private:
   }
 
   NdbQueryBuilder m_interface;
-  NdbError m_error;
+  // Allow update error from const methods
+  mutable NdbError m_error;
 
   Vector<NdbQueryOperationDefImpl*> m_operations;
   Vector<NdbQueryOperandImpl*> m_operands;
@@ -796,7 +799,7 @@ public:
   { return m_column; }
 
   virtual int bindOperand(const NdbColumnImpl& column,
-                          NdbQueryOperationDefImpl& operation)
+                          NdbQueryOperationDefImpl& /*operation*/)
   { if (m_column  && m_column != &column)
       // Already bounded to a different column
       return QRY_OPERAND_ALREADY_BOUND;
@@ -816,7 +819,7 @@ protected:
   virtual ~NdbQueryOperandImpl(){}
 
   NdbQueryOperandImpl(Kind kind)
-    : m_column(0),
+    : m_column(nullptr),
       m_kind(kind)
   {}
 
@@ -839,7 +842,7 @@ public:
   { return m_parentOperation; }
 
   // 'LinkedSrc' is index into parent op's spj-projection list where
-  // the refered column value is available
+  // the referred column value is available
   Uint32 getLinkedColumnIx() const
   { return m_parentColumnIx; }
 
@@ -905,7 +908,7 @@ public:
   Uint32 getSizeInBytes() const
   { return m_converted.len; }
   const void* getAddr() const
-  { return likely(m_converted.buffer==NULL) ? &m_converted.val : m_converted.buffer; }
+  { return likely(m_converted.buffer==nullptr) ? &m_converted.val : m_converted.buffer; }
 
   NdbQueryOperand& getInterface() override
   { return m_interface; }
@@ -960,7 +963,7 @@ protected:
     */
   class ConvertedValue {
   public:
-    ConvertedValue()  : len(0), buffer(NULL) {}
+    ConvertedValue()  : len(0), buffer(nullptr) {}
     ~ConvertedValue() {
       if (buffer) delete[] ((char*)buffer);
     }

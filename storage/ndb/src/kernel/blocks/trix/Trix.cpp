@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -213,8 +213,8 @@ void Trix::execNDB_STTOR(Signal* signal)
   Uint16 startphase = signal->theData[2];      /* RESTART PHASE           */
   Uint16 mynode = signal->theData[1];		 
   //Uint16 restarttype = signal->theData[3];	 
-  //UintR configInfo1 = signal->theData[6];     /* CONFIGRATION INFO PART 1 */
-  //UintR configInfo2 = signal->theData[7];     /* CONFIGRATION INFO PART 2 */
+  //UintR configInfo1 = signal->theData[6];     /* CONFIGURATION INFO PART 1 */
+  //UintR configInfo2 = signal->theData[7];     /* CONFIGURATION INFO PART 2 */
   switch (startphase) {
   case 3:
     jam();
@@ -247,7 +247,7 @@ void Trix::execREAD_NODESCONF(Signal* signal)
     ndbrequire(signal->getNoOfSections() == 1);
     SegmentedSectionPtr ptr;
     SectionHandle handle(this, signal);
-    handle.getSection(ptr, 0);
+    ndbrequire(handle.getSection(ptr, 0));
     ndbrequire(ptr.sz == 5 * NdbNodeBitmask::Size);
     copy(readNodes->definedNodes.rep.data, ptr);
     releaseSections(handle);
@@ -319,7 +319,7 @@ void Trix::execNODE_FAILREP(Signal* signal)
         getNodeInfo(refToNode(signal->getSendersBlockRef())).m_version));
     SegmentedSectionPtr ptr;
     SectionHandle handle(this, signal);
-    handle.getSection(ptr, 0);
+    ndbrequire(handle.getSection(ptr, 0));
     memset(nodeFail->theNodes, 0, sizeof(nodeFail->theNodes));
     copy(nodeFail->theNodes, ptr);
     releaseSections(handle);
@@ -591,7 +591,9 @@ void Trix::execDBINFO_SCANREQ(Signal *signal)
 
     const size_t num_config_params =
       sizeof(pools[0].config_params) / sizeof(pools[0].config_params[0]);
+    const Uint32 numPools = NDB_ARRAY_SIZE(pools);
     Uint32 pool = cursor->data[0];
+    ndbrequire(pool < numPools);
     BlockNumber bn = blockToMain(number());
     while(pools[pool].poolname)
     {
@@ -696,14 +698,14 @@ void Trix:: execBUILD_INDX_IMPL_REQ(Signal* signal)
   if (noOfSections > 0) {
     jam();
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, BuildIndxImplReq::INDEX_COLUMNS);
+    ndbrequire(handle.getSection(ptr, BuildIndxImplReq::INDEX_COLUMNS));
     append(subRec->attributeOrder, ptr, getSectionSegmentPool());
     subRec->noOfIndexColumns = ptr.sz;
   }
   if (noOfSections > 1) {
     jam();
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, BuildIndxImplReq::KEY_COLUMNS);
+    ndbrequire(handle.getSection(ptr, BuildIndxImplReq::KEY_COLUMNS));
     append(subRec->attributeOrder, ptr, getSectionSegmentPool());
     subRec->noOfKeyColumns = ptr.sz;
   }
@@ -1174,9 +1176,7 @@ void Trix::startTableScan(Signal* signal, SubscriptionRecPtr subRecPtr)
   else if (subRec->requestType == STAT_SCAN)
   {
     jam();
-    orderPtr[1].p = 0;
-    orderPtr[1].sz = 0;
-    noOfSections = 2;
+    noOfSections = 1;
     subSyncReq->requestInfo |= SubSyncReq::LM_CommittedRead;
     subSyncReq->requestInfo |= SubSyncReq::RangeScan;
     subSyncReq->requestInfo |= SubSyncReq::StatScan;
@@ -1260,8 +1260,8 @@ void Trix::executeBuildInsertTransaction(Signal* signal,
   SectionHandle handle(this, signal);
   SegmentedSectionPtr headerPtr, dataPtr;
 
-  handle.getSection(headerPtr, 0);
-  handle.getSection(dataPtr, 1);
+  ndbrequire(handle.getSection(headerPtr, 0));
+  ndbrequire(handle.getSection(dataPtr, 1));
 
   Uint32* headerBuffer = signal->theData + 25;
   Uint32* dataBuffer = headerBuffer + headerPtr.sz;
@@ -1280,7 +1280,7 @@ void Trix::executeBuildInsertTransaction(Signal* signal,
       return;
 
     if (i < subRec->noOfIndexColumns)
-      // Renumber index attributes in consequtive order
+      // Renumber index attributes in consecutive order
       keyAttrHead->setAttributeId(i);
     else
       // Calculate total size of PK attribute
@@ -1685,7 +1685,7 @@ Trix::execCOPY_DATA_IMPL_REQ(Signal* signal)
   if (noOfSections > 0) {
     jam();
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, 0);
+    ndbrequire(handle.getSection(ptr, 0));
     append(subRec->attributeOrder, ptr, getSectionSegmentPool());
     subRec->noOfIndexColumns = ptr.sz;
   }
@@ -1693,7 +1693,7 @@ Trix::execCOPY_DATA_IMPL_REQ(Signal* signal)
   if (noOfSections > 1) {
     jam();
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, 1);
+    ndbrequire(handle.getSection(ptr, 1));
     append(subRec->attributeOrder, ptr, getSectionSegmentPool());
     subRec->noOfKeyColumns = ptr.sz;
   }
@@ -1810,7 +1810,7 @@ Trix::execBUILD_FK_IMPL_REQ(Signal* signal)
   // Get parent columns...
   {
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, 0);
+    ndbrequire(handle.getSection(ptr, 0));
     append(subRec->attributeOrder, ptr, getSectionSegmentPool());
     subRec->noOfKeyColumns = ptr.sz;
   }
@@ -1818,7 +1818,7 @@ Trix::execBUILD_FK_IMPL_REQ(Signal* signal)
   {
     // Get child columns...
     SegmentedSectionPtr ptr;
-    handle.getSection(ptr, 1);
+    ndbrequire(handle.getSection(ptr, 1));
     append(subRec->attributeOrder, ptr, getSectionSegmentPool());
     subRec->noOfIndexColumns = ptr.sz;
   }
@@ -1878,8 +1878,8 @@ Trix::executeBuildFKTransaction(Signal* signal,
   SectionHandle handle(this, signal);
   SegmentedSectionPtr headerPtr, dataPtr;
 
-  handle.getSection(headerPtr, 0);
-  handle.getSection(dataPtr, 1);
+  ndbrequire(handle.getSection(headerPtr, 0));
+  ndbrequire(handle.getSection(dataPtr, 1));
 
   Uint32* headerBuffer = signal->theData + 25;
   Uint32* dataBuffer = headerBuffer + headerPtr.sz;
@@ -2495,12 +2495,12 @@ Trix::statUtilExecuteConf(Signal* signal, Uint32 statPtrI)
     attr.m_dataSize = 0;
     {
       SegmentedSectionPtr ssPtr;
-      handle.getSection(ssPtr, 0);
+      ndbrequire(handle.getSection(ssPtr, 0));
       ::copy(rattr, ssPtr);
     }
     {
       SegmentedSectionPtr ssPtr;
-      handle.getSection(ssPtr, 1);
+      ndbrequire(handle.getSection(ssPtr, 1));
       ::copy(rdata, ssPtr);
     }
     releaseSections(handle);
@@ -2742,17 +2742,16 @@ Trix::statCleanPrepare(Signal* signal, StatOp& stat)
   ndbrequire(ao_buf.isEmpty());
   ao_buf.append(ao_list, ao_size);
 
-  // create TUX bounds
-  clean.m_bound[0] = TuxBoundInfo::BoundEQ;
-  clean.m_bound[1] = AttributeHeader(0, 4).m_value;
-  clean.m_bound[2] = data.m_indexId;
-  clean.m_bound[3] = TuxBoundInfo::BoundEQ;
-  clean.m_bound[4] = AttributeHeader(1, 4).m_value;
-  clean.m_bound[5] = data.m_indexVersion;
-  Uint32 boundCount;
+  Uint32 boundCount = 0;
   switch (stat.m_requestType) {
   case IndexStatReq::RT_CLEAN_NEW:
     D("statCleanPrepare delete sample versions > " << data.m_sampleVersion);
+    clean.m_bound[0] = TuxBoundInfo::BoundEQ;
+    clean.m_bound[1] = AttributeHeader(0, 4).m_value;
+    clean.m_bound[2] = data.m_indexId;
+    clean.m_bound[3] = TuxBoundInfo::BoundEQ;
+    clean.m_bound[4] = AttributeHeader(1, 4).m_value;
+    clean.m_bound[5] = data.m_indexVersion;
     clean.m_bound[6] = TuxBoundInfo::BoundLT;
     clean.m_bound[7] = AttributeHeader(2, 4).m_value;
     clean.m_bound[8] = data.m_sampleVersion;
@@ -2760,17 +2759,27 @@ Trix::statCleanPrepare(Signal* signal, StatOp& stat)
     break;
   case IndexStatReq::RT_CLEAN_OLD:
     D("statCleanPrepare delete sample versions < " << data.m_sampleVersion);
+    clean.m_bound[0] = TuxBoundInfo::BoundEQ;
+    clean.m_bound[1] = AttributeHeader(0, 4).m_value;
+    clean.m_bound[2] = data.m_indexId;
+    clean.m_bound[3] = TuxBoundInfo::BoundEQ;
+    clean.m_bound[4] = AttributeHeader(1, 4).m_value;
+    clean.m_bound[5] = data.m_indexVersion;
     clean.m_bound[6] = TuxBoundInfo::BoundGT;
     clean.m_bound[7] = AttributeHeader(2, 4).m_value;
     clean.m_bound[8] = data.m_sampleVersion;
     boundCount = 3;
     break;
   case IndexStatReq::RT_CLEAN_ALL:
-    D("statCleanPrepare delete all sample versions");
-    boundCount = 2;
+    D("statCleanPrepare delete all sample versions and index versions");
+    // Delete all entries corresponding to the index id. This handles
+    // scenarios involving index versions bumps as well
+    clean.m_bound[0] = TuxBoundInfo::BoundEQ;
+    clean.m_bound[1] = AttributeHeader(0, 4).m_value;
+    clean.m_bound[2] = data.m_indexId;
+    boundCount = 1;
     break;
   default:
-    boundCount = 0; /* Silence compiler warning */
     ndbabort();
   }
   clean.m_boundSize = 3 * boundCount;
@@ -2798,7 +2807,7 @@ Trix::statCleanExecute(Signal* signal, StatOp& stat)
   // ATTR_INFO
   AttributeHeader ah[4];
   SegmentedSectionPtr ptr0;
-  handle.getSection(ptr0, SubTableData::ATTR_INFO);
+  ndbrequire(handle.getSection(ptr0, SubTableData::ATTR_INFO));
   ndbrequire(ptr0.sz == 4);
   ::copy((Uint32*)ah, ptr0);
   ndbrequire(ah[0].getAttributeId() == 0 && ah[0].getDataSize() == 1);
@@ -2813,11 +2822,11 @@ Trix::statCleanExecute(Signal* signal, StatOp& stat)
   const Uint32 avmax = 3 + 1 + MAX_INDEX_STAT_KEY_SIZE;
   Uint32 av[avmax];
   SegmentedSectionPtr ptr1;
-  handle.getSection(ptr1, SubTableData::AFTER_VALUES);
+  ndbrequire(handle.getSection(ptr1, SubTableData::AFTER_VALUES));
   ndbrequire(ptr1.sz <= avmax);
   ::copy(av, ptr1);
   ndbrequire(data.m_indexId == av[0]);
-  ndbrequire(data.m_indexVersion == av[1]);
+  data.m_indexVersion = av[1];
   data.m_sampleVersion = av[2];
   data.m_statKey = &av[3];
   const unsigned char* kp = (const unsigned char*)data.m_statKey;
@@ -2974,7 +2983,7 @@ Trix::statScanExecute(Signal* signal, StatOp& stat)
   // ATTR_INFO
   AttributeHeader ah[2];
   SegmentedSectionPtr ptr0;
-  handle.getSection(ptr0, SubTableData::ATTR_INFO);
+  ndbrequire(handle.getSection(ptr0, SubTableData::ATTR_INFO));
   ndbrequire(ptr0.sz == 2);
   ::copy((Uint32*)ah, ptr0);
   ndbrequire(ah[0].getAttributeId() == AttributeHeader::INDEX_STAT_KEY);
@@ -2989,7 +2998,7 @@ Trix::statScanExecute(Signal* signal, StatOp& stat)
   const Uint32 avmax = 2 + MAX_INDEX_STAT_KEY_SIZE + MAX_INDEX_STAT_VALUE_SIZE;
   Uint32 av[avmax];
   SegmentedSectionPtr ptr1;
-  handle.getSection(ptr1, SubTableData::AFTER_VALUES);
+  ndbrequire(handle.getSection(ptr1, SubTableData::AFTER_VALUES));
   ndbrequire(ptr1.sz <= avmax);
   ::copy(av, ptr1);
   data.m_statKey = &av[0];

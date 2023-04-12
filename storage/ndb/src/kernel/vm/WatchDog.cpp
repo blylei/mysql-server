@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,7 +27,7 @@
 
 #include <time.h>
 
-#include "mt-asm.h"
+#include "portlib/mt-asm.h"
 #include "WatchDog.hpp"
 #include "GlobalData.hpp"
 #include <NdbOut.hpp>
@@ -317,7 +317,7 @@ WatchDog::run()
       g_eventLogger->warning("Watchdog: Time ticked backwards %llu ms.",
                              NdbTick_Elapsed(now, last_ticks).milliSec());
       /**
-       * A backtick after sleeping 100ms, is considdered a
+       * A backtick after sleeping 100ms, is considered a
        * fatal error if monotonic timers are used.
        */
       assert(!NdbTick_IsMonotonic());

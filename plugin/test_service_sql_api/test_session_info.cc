@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -33,7 +33,7 @@
 #include "my_io.h"
 #include "my_psi_config.h"
 #include "my_sys.h"  // my_write, my_malloc
-#include "mysql/components/services/psi_thread_bits.h"
+#include "mysql/components/services/bits/psi_thread_bits.h"
 #include "mysql/psi/mysql_thread.h"
 #include "mysql_com.h"
 #include "sql_string.h" /* STRING_PSI_MEMORY_KEY */
@@ -185,9 +185,8 @@ static int sql_start_result_metadata(void *ctx, uint num_cols, uint,
   struct st_plugin_ctx *pctx = (struct st_plugin_ctx *)ctx;
   DBUG_TRACE;
   DBUG_PRINT("info", ("resultcs->number: %d", resultcs->number));
-  DBUG_PRINT("info",
-             ("resultcs->csname: %s", replace_utf8_utf8mb3(resultcs->csname)));
-  DBUG_PRINT("info", ("resultcs->name: %s", resultcs->name));
+  DBUG_PRINT("info", ("resultcs->csname: %s", resultcs->csname));
+  DBUG_PRINT("info", ("resultcs->name: %s", resultcs->m_coll_name));
   pctx->num_cols = num_cols;
   pctx->resultcs = resultcs;
   pctx->current_col = 0;
@@ -546,8 +545,8 @@ static void exec_test_cmd(MYSQL_SESSION session, const char *query,
   cmd.com_query.length = strlen(cmd.com_query.query);
   WRITE_VAL("%s\n", query);
   int fail = command_service_run_command(session, COM_QUERY, &cmd,
-                                         &my_charset_utf8_general_ci, &sql_cbs,
-                                         CS_TEXT_REPRESENTATION, ctx);
+                                         &my_charset_utf8mb3_general_ci,
+                                         &sql_cbs, CS_TEXT_REPRESENTATION, ctx);
   if (fail) {
     srv_session_close(session);
     if (!expect_error)
@@ -585,9 +584,9 @@ static void test_com_init_db(void *p [[maybe_unused]], MYSQL_SESSION st_session,
   cmd.com_init_db.db_name = db_name;
   cmd.com_init_db.length = strlen(db_name);
 
-  int fail = command_service_run_command(st_session, COM_INIT_DB, &cmd,
-                                         &my_charset_utf8_general_ci, &sql_cbs,
-                                         CS_TEXT_REPRESENTATION, plugin_ctx);
+  int fail = command_service_run_command(
+      st_session, COM_INIT_DB, &cmd, &my_charset_utf8mb3_general_ci, &sql_cbs,
+      CS_TEXT_REPRESENTATION, plugin_ctx);
 
   if (fail) {
     LogPluginErr(ERROR_LEVEL, ER_LOG_PRINTF_MSG, "run_statement code: %d\n",
@@ -932,9 +931,9 @@ static void test_sql(void *p) {
   cmd.com_query.query = buffer_query;
   cmd.com_query.length = strlen(buffer_query);
 
-  int fail = command_service_run_command(session_2, COM_QUERY, &cmd,
-                                         &my_charset_utf8_general_ci, &sql_cbs,
-                                         CS_TEXT_REPRESENTATION, plugin_ctx);
+  int fail = command_service_run_command(
+      session_2, COM_QUERY, &cmd, &my_charset_utf8mb3_general_ci, &sql_cbs,
+      CS_TEXT_REPRESENTATION, plugin_ctx);
 
   if (fail) {
     LogPluginErr(ERROR_LEVEL, ER_LOG_PRINTF_MSG, "run_statement code: %d\n",
@@ -954,7 +953,7 @@ static void test_sql(void *p) {
   cmd.com_query.length = strlen(buffer_query);
 
   fail = command_service_run_command(session_2, COM_QUERY, &cmd,
-                                     &my_charset_utf8_general_ci, &sql_cbs,
+                                     &my_charset_utf8mb3_general_ci, &sql_cbs,
                                      CS_TEXT_REPRESENTATION, plugin_ctx);
 
   if (fail) {

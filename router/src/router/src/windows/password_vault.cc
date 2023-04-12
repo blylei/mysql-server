@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -38,7 +38,6 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
-#include <strstream>
 #include <vector>
 
 #include "mysql/harness/utility/string.h"
@@ -133,8 +132,10 @@ void PasswordVault::load_passwords() {
                       vault_path.c_str(), code));
   }
 
-  std::strstream ss(reinterpret_cast<char *>(buf_decrypted.pbData),
-                    buf_decrypted.cbData, std::ios_base::in);
+  std::stringstream ss(
+      std::string(reinterpret_cast<char *>(buf_decrypted.pbData),
+                  buf_decrypted.cbData),
+      std::ios_base::in);
 
   std::string line;
   std::string section_name;

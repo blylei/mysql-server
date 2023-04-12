@@ -1,7 +1,7 @@
 #ifndef SQL_EXECUTOR_INCLUDED
 #define SQL_EXECUTOR_INCLUDED
 
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -142,7 +142,7 @@ class SJ_TMP_TABLE {
 */
 class Semijoin_mat_exec {
  public:
-  Semijoin_mat_exec(TABLE_LIST *sj_nest, bool is_scan, uint table_count,
+  Semijoin_mat_exec(Table_ref *sj_nest, bool is_scan, uint table_count,
                     uint mat_table_index, uint inner_table_index)
       : sj_nest(sj_nest),
         is_scan(is_scan),
@@ -152,7 +152,7 @@ class Semijoin_mat_exec {
         table_param(),
         table(nullptr) {}
   ~Semijoin_mat_exec() = default;
-  TABLE_LIST *const sj_nest;     ///< Semi-join nest for this materialization
+  Table_ref *const sj_nest;      ///< Semi-join nest for this materialization
   const bool is_scan;            ///< true if executing a scan, false if lookup
   const uint table_count;        ///< Number of tables in the sj-nest
   const uint mat_table_index;    ///< Index in join_tab for materialized table
@@ -226,9 +226,9 @@ bool copy_funcs(Temp_table_param *, const THD *thd,
   @param ref   information about the index lookup key
 
   @retval false ref key copied successfully
-  @retval true  error dectected during copying of key
+  @retval true  error detected during copying of key
 */
-bool construct_lookup_ref(THD *thd, TABLE *table, TABLE_REF *ref);
+bool construct_lookup(THD *thd, TABLE *table, Index_lookup *ref);
 
 /** Help function when we get some an error from the table handler. */
 int report_handler_error(TABLE *table, int error);
@@ -238,12 +238,12 @@ int join_read_const_table(JOIN_TAB *tab, POSITION *pos);
 int do_sj_dups_weedout(THD *thd, SJ_TMP_TABLE *sjtbl);
 int update_item_cache_if_changed(List<Cached_item> &list);
 
-// Create list for using with tempory table
+// Create list for using with temporary table
 bool change_to_use_tmp_fields(mem_root_deque<Item *> *fields, THD *thd,
                               Ref_item_array ref_item_array,
                               mem_root_deque<Item *> *res_fields,
                               size_t added_non_hidden_fields);
-// Create list for using with tempory table
+// Create list for using with temporary table
 bool change_to_use_tmp_fields_except_sums(mem_root_deque<Item *> *fields,
                                           THD *thd, Query_block *select,
                                           Ref_item_array ref_item_array,
@@ -254,7 +254,7 @@ bool setup_sum_funcs(THD *thd, Item_sum **func_ptr);
 bool make_group_fields(JOIN *main_join, JOIN *curr_join);
 bool check_unique_constraint(TABLE *table);
 ulonglong unique_hash(const Field *field, ulonglong *hash);
-int read_const(TABLE *table, TABLE_REF *ref);
+int read_const(TABLE *table, Index_lookup *ref);
 
 class QEP_TAB : public QEP_shared_owner {
  public:
@@ -350,7 +350,7 @@ class QEP_TAB : public QEP_shared_owner {
 
  public:
   /// Pointer to table reference
-  TABLE_LIST *table_ref;
+  Table_ref *table_ref;
 
   /* Variables for semi-join duplicate elimination */
   SJ_TMP_TABLE *flush_weedout_table;
@@ -431,7 +431,7 @@ class QEP_TAB : public QEP_shared_owner {
 
   /**
     If we pushed a global ORDER BY down onto this first table, that ORDER BY
-    list will be preseved here.
+    list will be preserved here.
    */
   ORDER *filesort_pushed_order = nullptr;
 
@@ -477,7 +477,6 @@ void init_tmptable_sum_functions(Item_sum **func_ptr);
 void update_tmptable_sum_func(Item_sum **func_ptr, TABLE *tmp_table);
 bool has_rollup_result(Item *item);
 bool is_rollup_group_wrapper(Item *item);
-bool is_rollup_sum_wrapper(Item *item);
 Item *unwrap_rollup_group(Item *item);
 
 /*
@@ -492,7 +491,29 @@ struct PendingCondition {
 };
 
 /**
-  Create an AND conjuction of all given items. If there are no items, returns
+  Cache invalidator iterators we need to apply, but cannot yet due to outer
+  joins. As soon as “table_index_to_invalidate” is visible in our current join
+  nest (which means there could no longer be NULL-complemented rows we could
+  forget), we can and must output this invalidator and remove it from the array.
+ */
+struct PendingInvalidator {
+  /**
+    The table whose every (post-join) row invalidates one or more derived
+    lateral tables.
+   */
+  QEP_TAB *qep_tab;
+  plan_idx table_index_to_invalidate;
+};
+
+enum CallingContext {
+  TOP_LEVEL,
+  DIRECTLY_UNDER_SEMIJOIN,
+  DIRECTLY_UNDER_OUTER_JOIN,
+  DIRECTLY_UNDER_WEEDOUT
+};
+
+/**
+  Create an AND conjunction of all given items. If there are no items, returns
   nullptr. If there's only one item, returns that item.
  */
 Item *CreateConjunction(List<Item> *items);
@@ -504,7 +525,8 @@ unique_ptr_destroy_only<RowIterator> PossiblyAttachFilterIterator(
 void SplitConditions(Item *condition, QEP_TAB *current_table,
                      std::vector<Item *> *predicates_below_join,
                      std::vector<PendingCondition> *predicates_above_join,
-                     std::vector<PendingCondition> *join_conditions);
+                     std::vector<PendingCondition> *join_conditions,
+                     plan_idx semi_join_table_idx, qep_tab_map left_tables);
 
 /**
   For a MATERIALIZE access path, move any non-basic iterators (e.g. sorts and
@@ -518,19 +540,24 @@ void SplitConditions(Item *condition, QEP_TAB *current_table,
 
   If a ZERO_ROWS access path is materialized, we simply replace the MATERIALIZE
   path with the ZERO_ROWS path, since there is nothing to materialize.
+  @param path the MATERIALIZE path.
+  @param query_block The query block in which 'path' belongs.
+  @returns The new root of the set of AccessPaths formed by 'path' and its
+  descendants.
  */
-AccessPath *MoveCompositeIteratorsFromTablePath(AccessPath *path);
+AccessPath *MoveCompositeIteratorsFromTablePath(AccessPath *path,
+                                                const Query_block &query_block);
 
 AccessPath *GetAccessPathForDerivedTable(THD *thd, QEP_TAB *qep_tab,
                                          AccessPath *table_path);
 AccessPath *GetAccessPathForDerivedTable(
-    THD *thd, TABLE_LIST *table_ref, TABLE *table, bool rematerialize,
+    THD *thd, Table_ref *table_ref, TABLE *table, bool rematerialize,
     Mem_root_array<const AccessPath *> *invalidators, bool need_rowid,
     AccessPath *table_path);
 
 void ConvertItemsToCopy(const mem_root_deque<Item *> &items, Field **fields,
                         Temp_table_param *param);
-std::string RefToString(const TABLE_REF &ref, const KEY *key,
+std::string RefToString(const Index_lookup &ref, const KEY *key,
                         bool include_nulls);
 
 bool MaterializeIsDoingDeduplication(TABLE *table);
@@ -541,12 +568,12 @@ bool MaterializeIsDoingDeduplication(TABLE *table);
   condition_parts. E.g. if you have ((a AND b) AND c), condition_parts
   will contain [a, b, c], plus whatever it contained before the call.
  */
-void ExtractConditions(Item *condition,
+bool ExtractConditions(Item *condition,
                        Mem_root_array<Item *> *condition_parts);
 
 AccessPath *create_table_access_path(THD *thd, TABLE *table,
                                      AccessPath *range_scan,
-                                     TABLE_LIST *table_ref, POSITION *position,
+                                     Table_ref *table_ref, POSITION *position,
                                      bool count_examined_rows);
 
 /**
@@ -556,7 +583,7 @@ AccessPath *create_table_access_path(THD *thd, TABLE *table,
   Returns nullptr on failure.
  */
 unique_ptr_destroy_only<RowIterator> init_table_iterator(
-    THD *thd, TABLE *table, AccessPath *range_scan, TABLE_LIST *table_ref,
+    THD *thd, TABLE *table, AccessPath *range_scan, Table_ref *table_ref,
     POSITION *position, bool ignore_not_found_rows, bool count_examined_rows);
 
 /**
@@ -570,5 +597,14 @@ inline unique_ptr_destroy_only<RowIterator> init_table_iterator(
   return init_table_iterator(thd, table, nullptr, nullptr, nullptr,
                              ignore_not_found_rows, count_examined_rows);
 }
+
+AccessPath *ConnectJoins(plan_idx upper_first_idx, plan_idx first_idx,
+                         plan_idx last_idx, QEP_TAB *qep_tabs, THD *thd,
+                         CallingContext calling_context,
+                         std::vector<PendingCondition> *pending_conditions,
+                         std::vector<PendingInvalidator> *pending_invalidators,
+                         std::vector<PendingCondition> *pending_join_conditions,
+                         qep_tab_map *unhandled_duplicates,
+                         table_map *conditions_depend_on_outer_tables);
 
 #endif /* SQL_EXECUTOR_INCLUDED */

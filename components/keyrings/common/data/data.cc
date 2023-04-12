@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -73,13 +73,13 @@ Type Data::type() const { return type_; }
 bool Data::valid() const { return valid_; }
 
 /** Set data */
-void Data::set_data(const Sensitive_data data) {
+void Data::set_data(const Sensitive_data &data) {
   data_ = data;
   set_validity();
 }
 
 /** Set data */
-void Data::set_data(const Data src) { *this = src; }
+void Data::set_data(const Data &src) { *this = src; }
 
 /** Set type */
 void Data::set_type(Type type) {

@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2013, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -45,7 +45,7 @@
 
 class Find_thd_user_var : public Find_THD_Impl {
  public:
-  Find_thd_user_var(THD *unsafe_thd) : m_unsafe_thd(unsafe_thd) {}
+  explicit Find_thd_user_var(THD *unsafe_thd) : m_unsafe_thd(unsafe_thd) {}
 
   bool operator()(THD *thd) override {
     if (thd != m_unsafe_thd) {
@@ -333,8 +333,8 @@ int table_uvar_by_thread::read_row_values(TABLE *table, unsigned char *buf,
           set_field_ulonglong(f, m_row.m_thread_internal_id);
           break;
         case 1: /* VARIABLE_NAME */
-          set_field_varchar_utf8(f, m_row.m_variable_name->m_str,
-                                 m_row.m_variable_name->m_length);
+          set_field_varchar_utf8mb4(f, m_row.m_variable_name->m_str,
+                                    m_row.m_variable_name->m_length);
           break;
         case 2: /* VARIABLE_VALUE */
           if (m_row.m_variable_value->get_value_length() > 0) {

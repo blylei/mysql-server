@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,6 +49,7 @@ class FsCloseReq {
    */
   friend class Backup;
   friend class Dbdict;
+  friend class Dbdih;
   friend class Restore;
   friend class Dbtup;
   friend class Ndbcntr;
@@ -80,6 +81,7 @@ private:
 
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_FSCLOSEREQ, Local);
 
 inline
 bool 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,8 +49,8 @@ RowIDIntersectionIterator::RowIDIntersectionIterator(
     Mem_root_array<unique_ptr_destroy_only<RowIterator>> children,
     unique_ptr_destroy_only<RowIterator> cpk_child)
     : RowIDCapableRowIterator(thd, table_arg),
-      m_children(move(children)),
-      m_cpk_child(move(cpk_child)),
+      m_children(std::move(children)),
+      m_cpk_child(std::move(cpk_child)),
       retrieve_full_rows(retrieve_full_rows),
       scans_inited(false),
       need_rows_in_rowid_order(need_rows_in_rowid_order) {
@@ -229,7 +229,7 @@ RowIDUnionIterator::RowIDUnionIterator(
     THD *thd, MEM_ROOT *return_mem_root, TABLE *table,
     Mem_root_array<unique_ptr_destroy_only<RowIterator>> children)
     : TableRowIterator(thd, table),
-      m_children(move(children)),
+      m_children(std::move(children)),
       queue(Quick_ror_union_less(table->file),
             Malloc_allocator<PSI_memory_key>(PSI_INSTRUMENT_ME)),
       mem_root(return_mem_root),

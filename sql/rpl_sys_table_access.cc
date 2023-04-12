@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,8 +26,8 @@
 #include <sstream>  // std::ostringstream
 
 #include "my_dbug.h"
+#include "sql-common/json_dom.h"  // Json_wrapper
 #include "sql/current_thd.h"
-#include "sql/json_dom.h"  // Json_wrapper
 #include "sql/log.h"
 #include "sql/rpl_sys_key_access.h"
 #include "sql/sql_base.h"
@@ -120,22 +120,22 @@ bool Rpl_sys_table_access::open(enum thr_lock_type lock_type) {
 
   // m_table_list[0] is m_schema_name.m_table_name
   // m_table_list[1] is m_schema_version_name.m_table_version_name
-  m_table_list = new TABLE_LIST[m_table_list_size];
+  m_table_list = new Table_ref[m_table_list_size];
 
-  TABLE_LIST *table_version = &m_table_list[m_table_version_index];
+  Table_ref *table_version = &m_table_list[m_table_version_index];
   *table_version =
-      TABLE_LIST(m_schema_version_name.c_str(), m_schema_version_name.length(),
-                 m_table_version_name.c_str(), m_table_version_name.length(),
-                 m_table_version_name.c_str(), m_lock_type);
-  table_version->open_strategy = TABLE_LIST::OPEN_IF_EXISTS;
+      Table_ref(m_schema_version_name.c_str(), m_schema_version_name.length(),
+                m_table_version_name.c_str(), m_table_version_name.length(),
+                m_table_version_name.c_str(), m_lock_type);
+  table_version->open_strategy = Table_ref::OPEN_IF_EXISTS;
   table_version->next_local = nullptr;
   table_version->next_global = nullptr;
 
-  TABLE_LIST *table_data = &m_table_list[m_table_data_index];
-  *table_data = TABLE_LIST(m_schema_name.c_str(), m_schema_name.length(),
-                           m_table_name.c_str(), m_table_name.length(),
-                           m_table_name.c_str(), m_lock_type);
-  table_data->open_strategy = TABLE_LIST::OPEN_IF_EXISTS;
+  Table_ref *table_data = &m_table_list[m_table_data_index];
+  *table_data = Table_ref(m_schema_name.c_str(), m_schema_name.length(),
+                          m_table_name.c_str(), m_table_name.length(),
+                          m_table_name.c_str(), m_lock_type);
+  table_data->open_strategy = Table_ref::OPEN_IF_EXISTS;
   table_data->next_local = table_version;
   table_data->next_global = table_version;
 

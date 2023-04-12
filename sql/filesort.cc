@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -71,6 +71,7 @@
 #include "mysql_com.h"
 #include "mysqld_error.h"
 #include "priority_queue.h"
+#include "sql-common/json_dom.h"  // Json_wrapper
 #include "sql/auth/sql_security_ctx.h"
 #include "sql/bounded_queue.h"
 #include "sql/cmp_varlen_keys.h"
@@ -84,7 +85,6 @@
 #include "sql/item_subselect.h"
 #include "sql/iterators/row_iterator.h"
 #include "sql/iterators/sorting_iterator.h"
-#include "sql/json_dom.h"  // Json_wrapper
 #include "sql/key_spec.h"
 #include "sql/malloc_allocator.h"
 #include "sql/merge_many_buff.h"
@@ -160,7 +160,7 @@ static bool check_if_pq_applicable(Opt_trace_context *trace, Sort_param *param,
 
 void Sort_param::decide_addon_fields(Filesort *file_sort,
                                      const Mem_root_array<TABLE *> &tables,
-                                     bool force_sort_positions) {
+                                     bool force_sort_rowids) {
   if (m_addon_fields_status != Addon_fields_status::unknown_status) {
     // Already decided.
     return;
@@ -194,7 +194,7 @@ void Sort_param::decide_addon_fields(Filesort *file_sort,
     }
   }
 
-  if (force_sort_positions) {
+  if (force_sort_rowids) {
     m_addon_fields_status = Addon_fields_status::keep_rowid;
   } else {
     /*
@@ -230,7 +230,7 @@ void Sort_param::init_for_filesort(Filesort *file_sort,
 
   local_sortorder = sf_array;
 
-  decide_addon_fields(file_sort, tables, file_sort->m_force_sort_positions);
+  decide_addon_fields(file_sort, tables, file_sort->m_force_sort_rowids);
   if (using_addon_fields()) {
     fixed_res_length = m_addon_length;
   } else {
@@ -357,7 +357,7 @@ static void trace_filesort_information(Opt_trace_context *trace,
                              applying WHERE condition.
 
   @note
-    If we sort by position (like if sort_positions is 1) filesort() will
+    If we sort row IDs (as opposed to addon fields), filesort() will
     call table->prepare_for_position().
 
   @returns   False if success, true if error
@@ -378,16 +378,6 @@ bool filesort(THD *thd, Filesort *filesort, RowIterator *source_iterator,
   uint s_length = 0;
 
   DBUG_TRACE;
-
-#ifndef NDEBUG
-  // 'pushed_join' feature need to read the partial joined results directly
-  // from the NDB API. First storing it into a temporary table, means that
-  // any joined child results are effectively wasted, and we will have to
-  // re-read them as non-pushed later.
-  for (TABLE *table : filesort->tables) {
-    assert(!table->file->member_of_pushed_join());
-  }
-#endif
 
   if (!(s_length = filesort->sort_order_length()))
     return true; /* purecov: inspected */
@@ -669,7 +659,7 @@ void filesort_free_buffers(TABLE *table, bool full) {
 
 Filesort::Filesort(THD *thd, Mem_root_array<TABLE *> tables_arg,
                    bool keep_buffers_arg, ORDER *order, ha_rows limit_arg,
-                   bool remove_duplicates, bool sort_positions,
+                   bool remove_duplicates, bool force_sort_rowids,
                    bool unwrap_rollup)
     : m_thd(thd),
       tables(std::move(tables_arg)),
@@ -678,7 +668,7 @@ Filesort::Filesort(THD *thd, Mem_root_array<TABLE *> tables_arg,
       sortorder(nullptr),
       using_pq(false),
       m_remove_duplicates(remove_duplicates),
-      m_force_sort_positions(sort_positions),
+      m_force_sort_rowids(force_sort_rowids),
       m_sort_order_length(make_sortorder(order, unwrap_rollup)) {}
 
 uint Filesort::make_sortorder(ORDER *order, bool unwrap_rollup) {
@@ -1112,7 +1102,7 @@ static int write_keys(Sort_param *param, Filesort_info *fs_info, uint count,
                        MYF(MY_WME)))
     return 1; /* purecov: inspected */
 
-  // Check that we wont have more chunks than we can possibly keep in memory.
+  // Check that we won't have more chunks than we can possibly keep in memory.
   if (my_b_tell(chunk_file) + sizeof(Merge_chunk) > (ulonglong)UINT_MAX)
     return 1; /* purecov: inspected */
 
@@ -1381,7 +1371,7 @@ size_t make_sortkey_from_item(Item *item, Item_result result_type,
     }
     case ROW_RESULT:
     default:
-      // This case should never be choosen
+      // This case should never be chosen
       assert(0);
       return dst_length.value();
   }
@@ -2157,7 +2147,7 @@ uint sortlength(THD *thd, st_sort_field *sortorder, uint s_length) {
         break;
       case ROW_RESULT:
       default:
-        // This case should never be choosen
+        // This case should never be chosen
         assert(0);
         break;
     }
@@ -2374,7 +2364,7 @@ Addon_fields *Filesort::get_addon_fields(
 bool Filesort::using_addon_fields() {
   if (m_sort_param.m_addon_fields_status ==
       Addon_fields_status::unknown_status) {
-    m_sort_param.decide_addon_fields(this, tables, m_force_sort_positions);
+    m_sort_param.decide_addon_fields(this, tables, m_force_sort_rowids);
   }
   return m_sort_param.using_addon_fields();
 }

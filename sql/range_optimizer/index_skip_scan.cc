@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -145,7 +145,13 @@ bool IndexSkipScanIterator::Init(void) {
 
   int result;
   seen_first_key = false;
-  table()->set_keyread(true);  // This access path demands index-only reads.
+  /* set keyread to true if all the attributes which are required by
+     the query are present in the index */
+  if (!table()->no_keyread && table()->covering_keys.is_set(index))
+    table()->set_keyread(true);
+  else
+    table()->set_keyread(false);
+
   MY_BITMAP *const save_read_set = table()->read_set;
 
   table()->column_bitmaps_set_no_signal(&column_bitmap, table()->write_set);

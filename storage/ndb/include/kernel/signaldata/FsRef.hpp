@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -88,6 +88,13 @@ struct FsRef {
 
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_FSOPENREF, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSCLOSEREF, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSREADREF, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSWRITEREF, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSSYNCREF, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSREMOVEREF, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSAPPENDREF, Local);
 
 inline
 FsRef::NdbfsErrorCodeType 

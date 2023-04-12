@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -87,6 +87,7 @@ BuildRequires:  cmake3 >= 3.6.1
 %{?el8:BuildRequires:  gcc-toolset-10-gcc}
 %{?el8:BuildRequires:  gcc-toolset-10-gcc-c++}
 BuildRequires:  bison >= 2.1
+BuildRequires:  elfutils
 BuildRequires:  time
 BuildRequires:  cyrus-sasl-devel
 BuildRequires:  libaio-devel
@@ -189,7 +190,7 @@ mkdir release
            -DWITH_NUMA=OFF \
            %{?mecab_option} \
 %if 0%{?cluster}
-           -DWITH_NDBCLUSTER=1 \
+           -DWITH_NDB=1 \
            -DNDB_UTILS_LINK_DYNAMIC=1 \
 %endif
 %if 0%{?commercial}
@@ -265,14 +266,18 @@ for p in \
          component_test_mysql_system_variable_set.so \
          component_test_component_deinit.so \
          component_test_global_priv_registration.so \
+         component_test_mysql_command_services.so \
+         test_services_command_services.so \
          component_test_page_track_component.so \
          component_test_pfs_notification.so \
          component_test_pfs_resource_group.so \
+         component_test_sensitive_system_variables.so \
          component_test_status_var_service_int.so \
          component_test_status_var_service_reg_only.so \
          component_test_status_var_service.so \
          component_test_status_var_service_str.so \
          component_test_status_var_service_unreg_only.so \
+         component_test_status_var_reader.so \
          component_test_string_service_charset.so \
          component_test_string_service_long.so \
          component_test_string_service.so \
@@ -293,6 +298,7 @@ for p in \
          component_udf_unreg_3_func.so \
          component_udf_unreg_int_func.so \
          component_udf_unreg_real_func.so \
+         conflicting_variables.so \
          daemon_example.ini \
          ha_example.so \
          ha_mock.so \
@@ -376,6 +382,7 @@ rm -r $(readlink var) var
 %attr(755, root, root) %{_bindir}/ndb_index_stat
 %attr(755, root, root) %{_bindir}/ndb_redo_log_reader
 %attr(755, root, root) %{_bindir}/ndb_restore
+%attr(755, root, root) %{_bindir}/ndb_secretsfile_reader
 %attr(755, root, root) %{_bindir}/ndb_select_all
 %attr(755, root, root) %{_bindir}/ndb_select_count
 %attr(755, root, root) %{_bindir}/ndb_show_tables
@@ -403,8 +410,8 @@ rm -r $(readlink var) var
 %attr(755, root, root) %{_bindir}/mysql_migrate_keyring
 
 %dir %{_libdir}/mysql/private
-%attr(755, root, root) %{_libdir}/mysql/private/libprotobuf-lite.so.3.11.4
-%attr(755, root, root) %{_libdir}/mysql/private/libprotobuf.so.3.11.4
+%attr(755, root, root) %{_libdir}/mysql/private/libprotobuf-lite.so.3.19.4
+%attr(755, root, root) %{_libdir}/mysql/private/libprotobuf.so.3.19.4
 %attr(755, root, root) %{_libdir}/mysql/private/libfido2.*
 
 %dir %{_libdir}/mysql/plugin
@@ -503,6 +510,8 @@ rm -r $(readlink var) var
 %attr(755, root, root) %{_libdir}/mysql/plugin/firewall.so
 %attr(755, root, root) %{_libdir}/mysql/plugin/authentication_fido.so
 %attr(755, root, root) %{_libdir}/mysql/plugin/component_keyring_encrypted_file.so
+%attr(755, root, root) %{_libdir}/mysql/plugin/component_keyring_oci.so
+%attr(755, root, root) %{_libdir}/mysql/plugin/component_enterprise_encryption.so
 %if 0%{?aws_sdk}
 %attr(755, root, root) %{_libdir}/mysql/plugin/keyring_aws.so
 %endif # aws_sdk
@@ -516,6 +525,19 @@ rm -r $(readlink var) var
 %dir %attr(750, mysql, mysql) /var/lib/mysql-keyring
 
 %changelog
+* Tue Jun 28 2022 Samar Pratap Singh <samar.pratap.singh@oracle.com> - 8.0.31-1
+- Added component_keyring_oci
+
+* Mon Jun 20 2022 Murthy Sidagam <venkata.sidagam@oracle.com> - 8.0.31-1
+- Added component_test_mysql_command_services.so test component
+- Added test_services_command_services.so test plugin
+
+* Wed Feb 02 2022 Harin Vadodaria <harin.vadodaria@oracle.com> - 8.0.30-1
+- Added component_enterprise_encryption
+
+* Mon Jan 03 2022 Harin Vadodaria <harin.vadodaria@oracle.com> - 8.0.29-1
+- Added component_test_sensitive_system_variables
+
 * Tue Aug 31 2021 Harin Vadodaria <harin.vadodaria@oracle.com> - 8.0.27-1
 - Added authentication_oci_client
 

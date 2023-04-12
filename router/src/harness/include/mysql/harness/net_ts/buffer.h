@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -30,6 +30,7 @@
 #include <limits>     // std::numeric_limits
 #include <stdexcept>  // length_error
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -69,6 +70,28 @@ inline const std::error_category &stream_category() noexcept {
           return "unknown";
       }
     }
+
+    bool equivalent(int mycode,
+                    const std::error_condition &other) const noexcept override {
+      if (*this == other.category() ||
+          std::string_view(name()) ==
+              std::string_view(other.category().name())) {
+        return mycode == other.value();
+      }
+
+      return false;
+    }
+
+    bool equivalent(const std::error_code &other,
+                    int mycode) const noexcept override {
+      if (*this == other.category() ||
+          std::string_view(name()) ==
+              std::string_view(other.category().name())) {
+        return mycode == other.value();
+      }
+
+      return false;
+    }
   };
 
   static stream_category_impl instance;
@@ -76,6 +99,10 @@ inline const std::error_category &stream_category() noexcept {
 }
 
 inline std::error_code make_error_code(net::stream_errc e) noexcept {
+  return {static_cast<int>(e), net::stream_category()};
+}
+
+inline std::error_condition make_error_condition(net::stream_errc e) noexcept {
   return {static_cast<int>(e), net::stream_category()};
 }
 
@@ -314,7 +341,7 @@ inline size_t buffer_size<mutable_buffer>(const mutable_buffer &b) noexcept {
  * @param dest buffer-sequence to copy to
  * @param src buffer-sequence to copy from
  * @param max_size max bytes to copy
- * @return bytes transfered from src to dest
+ * @return bytes transferred from src to dest
  *
  * see: 16.9 [buffer.copy]
  */
@@ -462,7 +489,12 @@ inline const_buffer buffer(
                       : impl::to_const_buffer(&data.front(), data.size());
 }
 
-// TODO(jkneschk): from-string-view
+template <class CharT, class Traits>
+inline const_buffer buffer(
+    const std::basic_string_view<CharT, Traits> &data) noexcept {
+  return data.empty() ? const_buffer{}
+                      : impl::to_const_buffer(data.data(), data.size());
+}
 
 template <class T, size_t N>
 inline mutable_buffer buffer(T (&data)[N], size_t n) noexcept {
@@ -674,7 +706,7 @@ class transfer_exactly {
    * @returns bytes to transfer
    */
   size_t operator()(const std::error_code &ec, size_t n) const {
-    // "unspecificed non-zero number"
+    // "unspecified non-zero number"
     constexpr size_t N = std::numeric_limits<size_t>::max();
 
     if (!ec && n < exact_) return std::min(exact_ - n, N);

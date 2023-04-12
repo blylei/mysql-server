@@ -446,6 +446,18 @@ t1.a= (SELECT a FROM t2 LIMIT 1)	{
                 {
                   "transformation": "equality_propagation",
                   "subselect_evaluation": [
+                  ] /* subselect_evaluation */,
+                  "resulting_condition": "(((/* select#2 */ select `t2`.`b` from `t2` limit 1) <> (/* select#3 */ select `t2`.`a` from `t2` limit 1)) and multiple equal((/* select#2 */ select `t2`.`b` from `t2` limit 1), `t1`.`a`))"
+                },
+                {
+                  "transformation": "constant_propagation",
+                  "subselect_evaluation": [
+                  ] /* subselect_evaluation */,
+                  "resulting_condition": "(((/* select#2 */ select `t2`.`b` from `t2` limit 1) <> (/* select#3 */ select `t2`.`a` from `t2` limit 1)) and multiple equal((/* select#2 */ select `t2`.`b` from `t2` limit 1), `t1`.`a`))"
+                },
+                {
+                  "transformation": "trivial_condition_removal",
+                  "subselect_evaluation": [
                     {
                       "subselect_execution": {
                         "select#": 2,
@@ -492,18 +504,6 @@ t1.a= (SELECT a FROM t2 LIMIT 1)	{
                         ] /* steps */
                       } /* subselect_execution */
                     }
-                  ] /* subselect_evaluation */,
-                  "resulting_condition": "((NULL <> (/* select#3 */ select `t2`.`a` from `t2` limit 1)) and multiple equal((/* select#2 */ select NULL from `t2` limit 1), `t1`.`a`))"
-                },
-                {
-                  "transformation": "constant_propagation",
-                  "subselect_evaluation": [
-                  ] /* subselect_evaluation */,
-                  "resulting_condition": "((NULL <> (/* select#3 */ select `t2`.`a` from `t2` limit 1)) and multiple equal((/* select#2 */ select NULL from `t2` limit 1), `t1`.`a`))"
-                },
-                {
-                  "transformation": "trivial_condition_removal",
-                  "subselect_evaluation": [
                   ] /* subselect_evaluation */,
                   "resulting_condition": null
                 }
@@ -2959,20 +2959,20 @@ TRACE
           },
           {
             "join_preparation": {
-              "select#": 4,
+              "select#": 5,
               "steps": [
                 {
-                  "expanded_query": "/* select#4 */ select 1 AS `1`"
+                  "expanded_query": "/* select#5 */ select 1 AS `1`"
                 }
               ] /* steps */
             } /* join_preparation */
           },
           {
             "join_preparation": {
-              "select#": 5,
+              "select#": 6,
               "steps": [
                 {
-                  "expanded_query": "/* select#5 */ select 2 AS `2`"
+                  "expanded_query": "/* select#6 */ select 2 AS `2`"
                 }
               ] /* steps */
             } /* join_preparation */
@@ -2980,7 +2980,7 @@ TRACE
           {
             "derived": {
               "table": "`q` `q1`",
-              "select#": 4,
+              "select#": 5,
               "materialized": true,
               "reusing_tmp_table": true
             } /* derived */
@@ -3011,14 +3011,14 @@ TRACE
           },
           {
             "join_optimization": {
-              "select#": 4,
+              "select#": 5,
               "steps": [
               ] /* steps */
             } /* join_optimization */
           },
           {
             "join_optimization": {
-              "select#": 5,
+              "select#": 6,
               "steps": [
               ] /* steps */
             } /* join_optimization */

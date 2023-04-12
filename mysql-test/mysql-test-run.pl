@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # -*- cperl -*-
 
-# Copyright (c) 2004, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2004, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -121,6 +121,7 @@ my $opt_start_dirty;
 my $opt_start_exit;
 my $opt_strace_client;
 my $opt_strace_server;
+my @opt_perf_servers;
 my $opt_stress;
 my $opt_tmpdir;
 my $opt_tmpdir_pid;
@@ -326,6 +327,7 @@ our $exe_mysql_migrate_keyring;
 our $exe_mysql_keyring_encryption_test;
 our $exe_mysqladmin;
 our $exe_mysqltest;
+our $exe_openssl;
 our $glob_mysql_test_dir;
 our $mysql_version_extra;
 our $mysql_version_id;
@@ -640,6 +642,18 @@ sub main {
                               template_path => "include/default_my.cnf",);
     unshift(@$tests, $tinfo);
   }
+  my $secondary_engine_suite = 0;
+  if (defined $::secondary_engine and $secondary_engine_support) {
+    foreach(@$tests) {
+      if ($_->{name} =~ /^$::secondary_engine/) {
+        $secondary_engine_suite = 1;
+        last;
+      }
+    }
+  }
+  if (!$secondary_engine_suite) {
+    $secondary_engine_support = 0;
+  }
 
   my $num_tests = @$tests;
   if ($num_tests == 0) {
@@ -805,8 +819,8 @@ sub main {
 
   if (@$completed != $num_tests) {
     # Not all tests completed, failure
-    mtr_report();
-    mtr_report("Only ", int(@$completed), " of $num_tests completed.");
+    mtr_print_line();
+    mtr_report(int(@$completed), " of $num_tests test(s) completed.");
     foreach (@tests_list) {
       $_->{key} = "$_" unless defined $_->{key};
     }
@@ -818,10 +832,15 @@ sub main {
       }
     }
     if (int(@not_completed) <= 100) {
-      mtr_error("Not all tests completed:", join(" ", @not_completed));
+      mtr_report("Not all tests completed:", join(" ", @not_completed));
     } else {
-      mtr_error("Not all tests completed:", join(" ", @not_completed[0...49]), "... and", int(@not_completed)-50, "more");
+      mtr_report("Not all tests completed:", join(" ", @not_completed[0...49]), "... and", int(@not_completed)-50, "more");
     }
+    mtr_report();
+    if(int(@$completed)) {
+      mtr_report_stats("In completed tests", $completed);
+    }
+    mtr_error("No test(s) completed");
   }
 
   mark_time_used('init');
@@ -1033,7 +1052,7 @@ sub run_test_server ($$$) {
                           mtr_report(" - found '$core_name' again, keeping it");
                           return;
                         }
-                        my $num_saved_cores = %saved_cores_paths;
+                        my $num_saved_cores = keys %saved_cores_paths;
                         mtr_report(" - found '$core_name'",
                                    "($num_saved_cores/$opt_max_save_core)");
 
@@ -1311,6 +1330,7 @@ sub run_worker ($) {
   check_running_as_root();
 
   if (using_extern()) {
+    $ENV{'EXTERN'} = 1;
     create_config_file_for_extern(%opts_extern);
   }
 
@@ -1358,7 +1378,7 @@ sub run_worker ($) {
 
       my $valgrind_reports = 0;
       if ($opt_valgrind_mysqld or $opt_sanitize) {
-        $valgrind_reports = valgrind_exit_reports();
+        $valgrind_reports = valgrind_exit_reports() if not $shutdown_report;
         print $server "VALGREP\n" if $valgrind_reports;
       }
 
@@ -1410,7 +1430,7 @@ sub shutdown_exit_reports() {
 
       # Mysqld crash at shutdown
       $found_report = 1
-        if ($line =~ /.*Assertion.*/ or
+        if ($line =~ /.*Assertion.*/i or
             $line =~ /.*mysqld got signal.*/ or
             $line =~ /.*mysqld got exception.*/);
 
@@ -1691,6 +1711,7 @@ sub command_line_setup {
     'max-test-fail=i'      => \$opt_max_test_fail,
     'strace-client'        => \$opt_strace_client,
     'strace-server'        => \$opt_strace_server,
+    'perf:s'               => \@opt_perf_servers,
 
     # Coverage, profiling etc
     'callgrind'                 => \$opt_callgrind,
@@ -1872,9 +1893,7 @@ sub command_line_setup {
   }
 
   foreach my $arg (@ARGV) {
-    if ($arg =~ /^--skip-/) {
-      push(@opt_extra_mysqld_opt, $arg);
-    } elsif ($arg =~ /^--$/) {
+    if ($arg =~ /^--$/) {
       # It is an effect of setting 'pass_through' in option processing
       # that the lone '--' separating options from arguments survives,
       # simply ignore it.
@@ -2288,6 +2307,10 @@ sub command_line_setup {
     mtr_warning("Strace only supported in Linux ");
   }
 
+  if (@opt_perf_servers && $opt_shutdown_timeout == 0) {
+    mtr_error("Using perf with --shutdown-timeout=0 produces empty perf.data");
+  }
+
   mtr_report("Checking supported features");
 
   check_mysqlbackup_support();
@@ -2665,9 +2688,32 @@ sub executable_setup () {
   $exe_mysql_migrate_keyring =
     mtr_exe_exists("$path_client_bindir/mysql_migrate_keyring");
   $exe_mysql_keyring_encryption_test =
+    mtr_exe_exists("$path_client_bindir/mysql_keyring_encryption_test");
+
+  # For custom OpenSSL builds, look for the my_openssl executable.
+  $exe_openssl =
     my_find_bin($bindir,
-                [ "runtime_output_directory", "libexec", "sbin", "bin" ],
-                "mysql_keyring_encryption_test");
+                [ "runtime_output_directory", "bin" ],
+                "my_openssl", NOT_REQUIRED);
+  # For system OpenSSL builds, use openssl found in PATH:
+  if (!$exe_openssl) {
+    if (IS_MAC) {
+      # We use homebrew, rather than macOS SSL.
+      # TODO(tdidriks) add an option to mysqltest to see whether we are using
+      # openssl@1.1 or openssl@3
+      my $machine_hw_name = `uname -m`;
+      if ($machine_hw_name =~ "arm64") {
+	$exe_openssl = "/opt/homebrew/opt/" . "openssl\@1.1" . "/bin/openssl";
+      } else {
+	$exe_openssl = "/usr/local/opt/" . "openssl\@1.1" . "/bin/openssl";
+      }
+    } else {
+      # We could use File::Which('openssl'),
+      # but we don't need to know the actual path.
+      $exe_openssl = 'openssl';
+    }
+  }
+  mtr_verbose("openssl is $exe_openssl");
 
   if ($ndbcluster_enabled) {
     # Look for single threaded NDB
@@ -3115,6 +3161,7 @@ sub environment_setup {
       ndb_show_tables
       ndb_waiter
       ndbxfrm
+      ndb_secretsfile_reader
     );
 
     foreach my $tool ( @ndb_tools)
@@ -3202,6 +3249,7 @@ sub environment_setup {
     client_arguments_no_grp_suffix("mysql_config_editor");
   $ENV{'MYSQL_SECURE_INSTALLATION'} =
     "$path_client_bindir/mysql_secure_installation";
+  $ENV{'OPENSSL_EXECUTABLE'} = $exe_openssl;
 
   my $exe_mysqld = find_mysqld($basedir);
   $ENV{'MYSQLD'} = $exe_mysqld;
@@ -3580,7 +3628,11 @@ sub check_ndbcluster_support ($) {
 
   my $ndbcluster_supported = 0;
   if ($mysqld_variables{'ndb-connectstring'}) {
-    $ndbcluster_supported = 1;
+    $exe_ndbd =
+      my_find_bin($bindir,
+                  [ "runtime_output_directory", "libexec", "sbin", "bin" ],
+                  "ndbd", NOT_REQUIRED);
+    $ndbcluster_supported = $exe_ndbd ? 1 : 0;
   }
 
   if ($opt_skip_ndbcluster && $opt_include_ndbcluster) {
@@ -3822,6 +3874,23 @@ sub ndbd_stop {
   # by sending "shutdown" to ndb_mgmd
 }
 
+# Modify command line so that program is bound to given list of CPUs
+sub cpubind_arguments {
+  my $args          = shift;
+  my $exe           = shift;
+  my $cpu_list      = shift;
+
+  # Prefix args with 'taskset -c <cpulist> <exe> ...'
+  my $prefix_args;
+  mtr_init_args(\$prefix_args);
+  mtr_add_arg($prefix_args, "-c");
+  mtr_add_arg($prefix_args, $cpu_list);
+  mtr_add_arg($prefix_args, $$exe);
+  unshift(@$args, @$prefix_args);
+
+  $$exe = "taskset";
+}
+
 sub ndbd_start {
   my ($cluster, $ndbd) = @_;
 
@@ -3829,15 +3898,6 @@ sub ndbd_start {
 
   my $dir = $ndbd->value("DataDir");
   mkpath($dir) unless -d $dir;
-
-  my $args;
-  mtr_init_args(\$args);
-  mtr_add_arg($args, "--defaults-file=%s", $path_config_file);
-  mtr_add_arg($args, "--defaults-group-suffix=%s",
-              $ndbd->after('cluster_config.ndbd'));
-  mtr_add_arg($args, "--nodaemon");
-
-  # > 5.0 { 'character-sets-dir' => \&fix_charset_dir },
 
   my $exe = $exe_ndbd;
   if ($exe_ndbmtd) {
@@ -3850,6 +3910,20 @@ sub ndbd_start {
       $exe = $exe_ndbmtd;
     }
   }
+
+  my $args;
+  mtr_init_args(\$args);
+
+  my $cpu_list = $ndbd->if_exist('#cpubind');
+  if (defined $cpu_list) {
+    mtr_print("Applying cpu binding '$cpu_list' for: ", $ndbd->name());
+    cpubind_arguments($args, \$exe, $cpu_list);
+  }
+
+  mtr_add_arg($args, "--defaults-file=%s", $path_config_file);
+  mtr_add_arg($args, "--defaults-group-suffix=%s",
+              $ndbd->after('cluster_config.ndbd'));
+  mtr_add_arg($args, "--nodaemon");
 
   my $path_ndbd_log = "$dir/ndbd.log";
   my $proc = My::SafeProcess->new(name     => $ndbd->after('cluster_config.'),
@@ -4090,7 +4164,7 @@ sub mysql_install_db {
 
   # Overwrite the buffer size to 24M for certain tests to pass
   mtr_add_arg($args, "--innodb_buffer_pool_size=24M");
-  mtr_add_arg($args, "--innodb-log-file-size=5M");
+  mtr_add_arg($args, "--innodb-redo-log-capacity=10M");
 
   # Overwrite innodb_autoextend_increment to 8 for reducing the
   # ibdata1 file size.
@@ -5488,14 +5562,30 @@ sub ndb_extract_ndbd_log_info($$) {
 sub get_log_from_proc ($$) {
   my ($proc, $name) = @_;
   my $srv_log = "";
-
+  my $found_error = 0;
   foreach my $mysqld (mysqlds()) {
     if ($mysqld->{proc} eq $proc) {
       my @srv_lines = extract_server_log($mysqld->value('#log-error'), $name);
       $srv_log =
         "\nServer log from this test:\n" .
-        "----------SERVER LOG START-----------\n" .
-        join("", @srv_lines) . "----------SERVER LOG END-------------\n";
+        "----------SERVER LOG START-----------\n" ;
+      if ($opt_valgrind) {
+	foreach my $line(@srv_lines) {
+	  $found_error = 1 if ($line =~ /.*Assertion.*/i
+            or $line =~ /.*mysqld got signal.*/
+	    or $line =~ /.*mysqld got exception.*/);
+          if ($found_error and $line =~ /.*HEAP SUMMARY.*/) {
+	    $srv_log = $srv_log . "Found server crash, skipping the memory usage report.\n";
+	    last;
+	  }
+	  $srv_log = $srv_log . $line;
+	}
+      }
+      else
+      {
+        $srv_log = $srv_log . join("",@srv_lines);
+      }
+      $srv_log = $srv_log . "----------SERVER LOG END-------------\n";
       last;
     }
   }
@@ -6154,6 +6244,11 @@ sub mysqld_arguments ($$$) {
     mtr_add_arg($args, "--log-output=file");
   }
 
+  # Force this initial explain_format value, so that tests don't fail with
+  # --hypergraph due to implicit conversion from TRADITIONAL to TREE. Check the
+  # definition of enum Explain_format_type for more details.
+  mtr_add_arg($args, "--explain-format=TRADITIONAL_STRICT");
+
   # Indicate to mysqld it will be debugged in debugger
   if ($glob_debugger) {
     mtr_add_arg($args, "--gdb");
@@ -6262,6 +6357,21 @@ sub mysqld_start ($$$$) {
 
   if ($opt_valgrind_mysqld) {
     valgrind_arguments($args, \$exe, $mysqld->name());
+  }
+
+  # Implementation for --perf[=<mysqld_name>]
+  if (@opt_perf_servers) {
+    my $name = $mysqld->name();
+    if (grep($_ eq "" || $name =~ /^$_/, @opt_perf_servers)) {
+      mtr_print("Using perf for: ", $name);
+      perf_arguments($args, \$exe, $name);
+    }
+  }
+
+  my $cpu_list = $mysqld->if_exist('#cpubind');
+  if (defined $cpu_list) {
+    mtr_print("Applying cpu binding '$cpu_list' for: ", $mysqld->name());
+    cpubind_arguments($args, \$exe, $cpu_list);
   }
 
   mtr_add_arg($args, "--defaults-group-suffix=%s", $mysqld->after('mysqld'));
@@ -6947,19 +7057,33 @@ sub start_check_testcase ($$$) {
   return $proc;
 }
 
-sub run_mysqltest ($) {
+# Run mysqltest and wait for it to finish
+# - this function is currently unused
+sub run_mysqltest ($$) {
   my $proc = start_mysqltest(@_);
   $proc->wait();
 }
 
 sub start_mysqltest ($) {
-  my ($tinfo) = @_;
+  my $tinfo = shift;
+
   my $exe = $exe_mysqltest;
   my $args;
 
   mark_time_used('admin');
 
   mtr_init_args(\$args);
+
+  # Extract settings for [mysqltest] section that always exist in generated
+  # config, the exception here is with extern server there is no config.
+  if (defined $config) {
+    my $mysqltest = $config->group('mysqltest');
+    my $cpu_list = $mysqltest->if_exist('#cpubind');
+    if (defined $cpu_list) {
+      mtr_print("Applying cpu binding '$cpu_list' for mysqltest");
+      cpubind_arguments($args, \$exe, $cpu_list);
+    }
+  }
 
   if ($opt_strace_client) {
     $exe = "strace";
@@ -7319,6 +7443,21 @@ sub debugger_arguments {
   } else {
     mtr_error("Unknown argument \"$debugger\" passed to --debugger");
   }
+}
+
+# Modify the exe and args so that program is run with "perf record"
+#
+sub perf_arguments {
+  my $args = shift;
+  my $exe  = shift;
+  my $type = shift;
+
+  mtr_add_arg($args, "record");
+  mtr_add_arg($args, "-o");
+  mtr_add_arg($args, "%s/log/%s.perf.data", $opt_vardir, $type);
+  mtr_add_arg($args, "-g"); # --call-graph
+  mtr_add_arg($args, $$exe);
+  $$exe = "perf";
 }
 
 # Modify the exe and args so that program is run in strace
@@ -7775,6 +7914,14 @@ Options for debugging the product
                         0 for no limit. Set it's default with MTR_MAX_TEST_FAIL.
   strace-client         Create strace output for mysqltest client.
   strace-server         Create strace output for mysqltest server.
+  perf[=<mysqld_name>]  Run mysqld with "perf record" saving profile data
+                        as var/log/<mysqld_name>.perf.data, The option can be
+                        specified more than once and otionally specify
+                        the name of mysqld to profile. i.e like this:
+                          --perf                           # Profile all
+                          --perf=mysqld.1 --perf=mysqld.5  # Profile only named
+                        Analyze profile data with:
+                         `perf report -i var/log/<mysqld_name>.perf.data`
 
 Options for lock_order
 

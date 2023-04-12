@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -500,7 +500,7 @@ AccessPath *get_best_skip_scan(THD *thd, RANGE_OPT_PARAM *param, SEL_TREE *tree,
   AccessPath *path = new (param->return_mem_root) AccessPath;
   path->type = AccessPath::INDEX_SKIP_SCAN;
   path->cost = best_read_cost.total_cost();
-  path->num_output_rows = best_records;
+  path->set_num_output_rows(best_records);
 
   IndexSkipScanParameters *ext =
       new (param->return_mem_root) IndexSkipScanParameters;

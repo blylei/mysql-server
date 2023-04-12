@@ -8,6 +8,17 @@
 set @old_opt_switch=@@optimizer_switch;
 set optimizer_switch='subquery_materialization_cost_based=off';
 
+-- disable_query_log
+-- disable_result_log
+# High values set for sampling scanning, effectively forcing full scan for
+# statistics.
+SET @innodb_stats_transient_sample_pages= @@GLOBAL.innodb_stats_transient_sample_pages;
+SET @@global.innodb_stats_transient_sample_pages=5000000000;
+SET @innodb_stats_persistent_sample_pages= @@GLOBAL.innodb_stats_persistent_sample_pages;
+SET @@global.innodb_stats_persistent_sample_pages=5000000000;
+-- enable_result_log
+-- enable_query_log
+
 --disable_warnings
 drop table if exists t0, t1, t2, t10, t11, t12;
 --enable_warnings
@@ -406,6 +417,7 @@ update t22 set c = '2005-12-08 15:58:27' where a = 255;
 ANALYZE TABLE t1, t11, t12, t21, t22;
 explain select t21.* from t21,t22 where t21.a = t22.a and 
 t22.a in (select t12.a from t11, t12 where t11.a in(255,256) and t11.a = t12.a and t11.c is null) and t22.c is null order by t21.a;
+--skip_if_hypergraph  # Depends on the query plan.
 explain format=json select * from t1 where a in (select a from t11);
 select t21.* from t21,t22 where t21.a = t22.a and 
 t22.a in (select t12.a from t11, t12 where t11.a in(255,256) and t11.a = t12.a and t11.c is null) and t22.c is null order by t21.a;
@@ -443,6 +455,7 @@ select * from t1 where 2 in (select a from t0);
 #
 let $query=select * from (select a from t0) x where a in (select a from t1);
 --eval explain $query
+--skip_if_hypergraph  # Depends on the query plan.
 --eval explain format=json $query
 drop table t0, t1;
 
@@ -568,6 +581,7 @@ insert into t3 select A.a + 10*B.a, A.a + 10*B.a, 'filler' from t1 A, t1 B, t1 C
 ANALYZE TABLE t1, t2, t3;
 explain select * from t1, t3 where t3.a in (select a from t2) and (t3.a < 10 or t3.a >30) and t1.a =3;
 --replace_regex /"rows_produced_per_join": 792/"rows_produced_per_join": 793/
+--skip_if_hypergraph  # Depends on the query plan.
 explain format=json select * from t1, t3 where t3.a in (select a from t2) and (t3.a < 10 or t3.a >30) and t1.a =3;
 
 #
@@ -3128,7 +3142,8 @@ SELECT Name FROM t2
 ANALYZE TABLE t1, t2, t3;
 --replace_column 11 10
 --eval EXPLAIN $query
---replace_regex /"filtered": "50.00"/"filtered": "10.00"/ /"read_cost": "0.12"/"read_cost": "0.13"/
+--replace_regex /"filtered": "50.00"/"filtered": "10.00"/ /"read_cost": "0.12"/"read_cost": "0.13"/ /"prefix_cost": "11.69"/"prefix_cost": "11.70"/
+--skip_if_hypergraph  # Depends on the query plan.
 --eval EXPLAIN FORMAT=JSON $query
 
 DROP TABLE t1,t2,t3;
@@ -5006,6 +5021,7 @@ WHERE g1 NOT IN
 );
 ANALYZE TABLE t1, t2, t3;
 eval explain $query;
+--skip_if_hypergraph  # Depends on the query plan.
 eval explain format=json $query;
 eval $query;
 
@@ -5094,7 +5110,10 @@ WHERE t1a.col_int_key IN (
   )
 );
 ANALYZE TABLE t1, t2;
-eval EXPLAIN $query;
+
+# Bug #33743582 DuplicatesWeedout test is flaky
+# eval EXPLAIN $query;
+
 --sorted_result
 eval $query;
 
@@ -6408,6 +6427,7 @@ SELECT t2.vc, t2.ik AS t2_ik, t1.ik AS t1_ik
 FROM t2 LEFT JOIN t1 ON t2.vc=t1.vc
 WHERE t2.vc IN (SELECT vc FROM t2 AS t3);
 ANALYZE TABLE t1, t2;
+--skip_if_hypergraph  # Depends on the query plan.
 eval explain format=json $query;
 --sorted_result
 eval $query;
@@ -6488,6 +6508,7 @@ WHERE (col_varchar_nokey, col_varchar_nokey) IN
     FROM t2 AS derived2
    );
 
+--skip_if_hypergraph  # Depends on the query plan.
 eval explain format=json $query;
 --sorted_result
 eval $query;
@@ -6525,6 +6546,7 @@ WHERE (col_int_nokey, col_int_nokey) IN
     FROM t2
    );
 
+--skip_if_hypergraph  # Depends on the query plan.
 eval explain format=json $query;
 --sorted_result
 eval $query;
@@ -6608,6 +6630,7 @@ WHERE (alias2.col_varchar_key, alias2.col_varchar_key) IN
         FROM t1 AS sq2_alias1, t1 AS sq2_alias2
         WHERE sq2_alias2.col_int_key < 2);
 --replace_regex /"eval_cost": "0.13"/"eval_cost": "0.12"/
+--skip_if_hypergraph  # Depends on the query plan.
 eval explain format=json $query;
 --sorted_result
 eval $query;
@@ -7069,6 +7092,7 @@ eval explain $query;
 # where we can't use NestedLoopSemiJoinWithDuplicateRemovalIterator since we
 # have a table that is both firstmatch (semijoin) _and_ outer join.
 --skip_if_hypergraph  # Depends on query plan.
+--replace_regex /  \(cost=[\ 0-9.*0-9\ ]*/\ (/
 eval explain format=tree $query;
 
 eval $query;
@@ -7337,3 +7361,10 @@ EXPLAIN FORMAT=tree SELECT * FROM t1 WHERE EXISTS ( SELECT alias1.f2 FROM t2 LEF
 --sorted_result
 SELECT * FROM t1 WHERE EXISTS ( SELECT alias1.f2 FROM t2 LEFT JOIN t1 ON 1 LEFT JOIN t1 AS alias1 ON 1 );
 DROP TABLE t1, t2;
+
+-- disable_query_log
+-- disable_result_log
+SET @@GLOBAL.innodb_stats_transient_sample_pages= @innodb_stats_transient_sample_pages;
+SET @@GLOBAL.innodb_stats_persistent_sample_pages= @innodb_stats_persistent_sample_pages;
+-- enable_result_log
+-- enable_query_log

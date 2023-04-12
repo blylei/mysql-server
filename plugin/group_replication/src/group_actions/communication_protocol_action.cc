@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -70,7 +70,8 @@ int Communication_protocol_action::set_consensus_leaders() const {
   Member_version const communication_protocol =
       convert_to_mysql_version(m_gcs_protocol);
   consensus_leaders_handler->set_consensus_leaders(
-      communication_protocol, is_single_primary_mode, my_role, my_gcs_id);
+      communication_protocol, is_single_primary_mode, my_role, my_gcs_id,
+      []() { return local_member_info->get_allow_single_leader(); });
 
   return 0;
 }
@@ -130,10 +131,6 @@ Communication_protocol_action::execute_action(bool,
 bool Communication_protocol_action::stop_action_execution(bool) {
   bool constexpr SUCCESS = false;
   return SUCCESS;
-}
-
-const char *Communication_protocol_action::get_action_name() {
-  return "Set group communication protocol";
 }
 
 Group_action_diagnostics *Communication_protocol_action::get_execution_info() {

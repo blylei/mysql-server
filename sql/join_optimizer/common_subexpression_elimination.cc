@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -33,12 +33,6 @@ namespace {
 
 Item *OrGroupWithSomeRemoved(Item_cond_or *or_item,
                              const List<Item> &items_to_remove);
-
-bool IsAnd(const Item *item) {
-  return item->type() == Item::COND_ITEM &&
-         down_cast<const Item_cond *>(item)->functype() ==
-             Item_func::COND_AND_FUNC;
-}
 
 bool IsOr(const Item *item) {
   return item->type() == Item::COND_ITEM &&

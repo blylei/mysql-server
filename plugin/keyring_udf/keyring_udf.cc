@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -21,10 +21,10 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include <algorithm>  // std::min
+#include <optional>
 
 #include <stdio.h>
 #include <sys/types.h>
-#include <boost/optional/optional.hpp>
 #include <memory>
 #include <new>
 
@@ -274,7 +274,7 @@ static bool validate_run_time(UDF_ARGS *args, int to_validate) {
 
 static bool keyring_udf_func_init(
     UDF_INIT *initid, UDF_ARGS *args, char *message, int to_validate,
-    const boost::optional<size_t> max_lenth_to_return,
+    const std::optional<size_t> max_lenth_to_return,
     const size_t size_of_memory_to_allocate) {
   initid->ptr = nullptr;
   uint expected_arg_count = get_args_count_from_validation_request(to_validate);
@@ -282,11 +282,12 @@ static bool keyring_udf_func_init(
   if (validate_compile_time(args, expected_arg_count, to_validate, message))
     return true;
 
-  if (max_lenth_to_return)
-    initid->max_length = *max_lenth_to_return;  // if no max_length_to_return
-                                                // passed to the function  it
-                                                // means that max_length stays
-                                                // default
+  if (max_lenth_to_return.has_value())
+    initid->max_length =
+        max_lenth_to_return.value();  // if no max_length_to_return
+                                      // passed to the function  it
+                                      // means that max_length stays
+                                      // default
   initid->maybe_null = true;
 
   if (size_of_memory_to_allocate != 0) {
@@ -459,11 +460,11 @@ char *keyring_key_fetch(UDF_INIT *initid, UDF_ARGS *args, char *,
 
   if (validate_run_time(args, VALIDATE_KEY_ID)) {
     *error = 1;
-    return 0;
+    return nullptr;
   }
 
-  if (fetch("keyring_key_fetch", args->args[0], &key, NULL, &key_len)) {
-    if (key != NULL) my_free(key);
+  if (fetch("keyring_key_fetch", args->args[0], &key, nullptr, &key_len)) {
+    if (key != nullptr) my_free(key);
     *error = 1;
     return nullptr;
   }
@@ -509,12 +510,13 @@ char *keyring_key_type_fetch(UDF_INIT *initid, UDF_ARGS *args, char *,
                              unsigned char *error) {
   if (validate_run_time(args, VALIDATE_KEY_ID)) {
     *error = 1;
-    return 0;
+    return nullptr;
   }
 
-  char *key_type = NULL;
-  if (fetch("keyring_key_type_fetch", args->args[0], NULL, &key_type, NULL)) {
-    if (key_type != NULL) my_free(key_type);
+  char *key_type = nullptr;
+  if (fetch("keyring_key_type_fetch", args->args[0], nullptr, &key_type,
+            nullptr)) {
+    if (key_type != nullptr) my_free(key_type);
     *error = 1;
     return nullptr;
   }
@@ -537,7 +539,7 @@ PLUGIN_EXPORT
 bool keyring_key_length_fetch_init(UDF_INIT *initid, UDF_ARGS *args,
                                    char *message) {
   return keyring_udf_func_init(initid, args, message, VALIDATE_KEY_ID,
-                               boost::none, 0);
+                               std::optional<size_t>(), 0);
 }
 
 PLUGIN_EXPORT
@@ -571,7 +573,7 @@ long long keyring_key_length_fetch(UDF_INIT *, UDF_ARGS *args,
 
   if (*error == 0 && key == nullptr) *is_null = 1;
 
-  if (key != NULL) my_free(key);
+  if (key != nullptr) my_free(key);
 
   // For the UDF 0 == failure.
   return (*error) ? 0 : key_len;

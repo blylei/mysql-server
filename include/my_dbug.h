@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -222,7 +222,7 @@ class AutoDebugTrace {
 #ifdef _WIN32
 #define DBUG_SUICIDE() DBUG_EXIT()
 #else
-extern void _db_suicide_() MY_ATTRIBUTE((noreturn));
+[[noreturn]] extern void _db_suicide_();
 extern void _db_flush_gcov_();
 #define DBUG_SUICIDE() (_db_flush_(), _db_suicide_())
 #endif
@@ -313,6 +313,7 @@ extern void _db_flush_gcov_();
 
 #define DBUG_LOG(keyword, v)                           \
   do {                                                 \
+    _db_pargs_(__LINE__, keyword);                     \
     if (_db_enabled_()) {                              \
       std::ostringstream sout;                         \
       sout << v;                                       \

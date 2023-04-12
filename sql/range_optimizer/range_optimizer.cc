@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -143,15 +143,12 @@
 
 using std::min;
 
-[[maybe_unused]] static uchar is_null_string[2] = {1, 0};
-
 static AccessPath *get_best_disjunct_quick(
     THD *thd, RANGE_OPT_PARAM *param, TABLE *table,
     bool index_merge_union_allowed, bool index_merge_sort_union_allowed,
-    bool index_merge_intersect_allowed, enum_order interesting_order,
-    bool skip_records_in_range, const MY_BITMAP *needed_fields,
-    SEL_IMERGE *imerge, Unique::Imerge_cost_buf_type *imerge_cost_buff,
-    const double cost_est, Key_map *needed_reg);
+    bool index_merge_intersect_allowed, bool skip_records_in_range,
+    const MY_BITMAP *needed_fields, SEL_IMERGE *imerge, const double cost_est,
+    Key_map *needed_reg);
 #ifndef NDEBUG
 static void print_quick(AccessPath *path, const Key_map *needed_reg);
 #endif
@@ -279,8 +276,8 @@ QUICK_RANGE::QUICK_RANGE()
       min_keypart_map(0),
       max_keypart_map(0) {}
 
-QUICK_RANGE::QUICK_RANGE(const uchar *min_key_arg, uint min_length_arg,
-                         key_part_map min_keypart_map_arg,
+QUICK_RANGE::QUICK_RANGE(MEM_ROOT *mem_root, const uchar *min_key_arg,
+                         uint min_length_arg, key_part_map min_keypart_map_arg,
                          const uchar *max_key_arg, uint max_length_arg,
                          key_part_map max_keypart_map_arg, uint flag_arg,
                          enum ha_rkey_function rkey_func_flag_arg)
@@ -292,11 +289,14 @@ QUICK_RANGE::QUICK_RANGE(const uchar *min_key_arg, uint min_length_arg,
       rkey_func_flag(rkey_func_flag_arg),
       min_keypart_map(min_keypart_map_arg),
       max_keypart_map(max_keypart_map_arg) {
-  min_key = static_cast<uchar *>(sql_memdup(min_key_arg, min_length_arg + 1));
-  max_key = static_cast<uchar *>(sql_memdup(max_key_arg, max_length_arg + 1));
-  // If we get is_null_string as argument, the memdup is undefined behavior.
-  assert(min_key_arg != is_null_string);
-  assert(max_key_arg != is_null_string);
+  min_key = mem_root->ArrayAlloc<uchar>(min_length_arg + 1);
+  max_key = mem_root->ArrayAlloc<uchar>(max_length_arg + 1);
+  if (min_key != nullptr) {
+    memcpy(min_key, min_key_arg, min_length_arg + 1);
+  }
+  if (max_key != nullptr) {
+    memcpy(max_key, max_key_arg, max_length_arg + 1);
+  }
 }
 
 /*
@@ -673,7 +673,7 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
   if (group_path) {
     DBUG_EXECUTE_IF("force_lis_for_group_by", group_path->cost = 0.0;);
     param.table->quick_condition_rows =
-        min<double>(group_path->num_output_rows, table->file->stats.records);
+        min<double>(group_path->num_output_rows(), table->file->stats.records);
     Opt_trace_object grp_summary(trace, "best_group_range_summary",
                                  Opt_trace_context::RANGE_OPTIMIZER);
     if (unlikely(trace->is_started()))
@@ -695,7 +695,7 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
                            skip_records_in_range, force_skip_scan);
     if (skip_scan_path) {
       param.table->quick_condition_rows = min<double>(
-          skip_scan_path->num_output_rows, table->file->stats.records);
+          skip_scan_path->num_output_rows(), table->file->stats.records);
       Opt_trace_object summary(trace, "best_skip_scan_summary",
                                Opt_trace_context::RANGE_OPTIMIZER);
       if (unlikely(trace->is_started()))
@@ -755,8 +755,8 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
           building covering ROR-intersection.
         */
         AccessPath *rori_path = get_best_ror_intersect(
-            thd, &param, table, index_merge_intersect_allowed,
-            interesting_order, tree, &needed_fields, best_cost,
+            thd, &param, table, index_merge_intersect_allowed, tree,
+            &needed_fields, best_cost,
             /*force_index_merge_result=*/true, /*reuse_handler=*/true);
         if (rori_path) {
           best_path = rori_path;
@@ -778,17 +778,16 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
                                         Opt_trace_context::RANGE_OPTIMIZER);
 
         // Buffer for index_merge cost estimates.
-        Unique::Imerge_cost_buf_type imerge_cost_buff;
         for (SEL_IMERGE &imerge : tree->merges) {
           new_conj_path = get_best_disjunct_quick(
               thd, &param, table, index_merge_union_allowed,
               index_merge_sort_union_allowed, index_merge_intersect_allowed,
-              interesting_order, skip_records_in_range, &needed_fields, &imerge,
-              &imerge_cost_buff, best_cost, needed_reg);
+              skip_records_in_range, &needed_fields, &imerge, best_cost,
+              needed_reg);
           if (new_conj_path)
             param.table->quick_condition_rows =
                 min<double>(param.table->quick_condition_rows,
-                            new_conj_path->num_output_rows);
+                            new_conj_path->num_output_rows());
           if (!best_conj_path ||
               (new_conj_path && new_conj_path->cost < best_conj_path->cost)) {
             best_conj_path = new_conj_path;
@@ -804,7 +803,7 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
     using indexes for access.
   */
   if (best_path && (table->file->ha_table_flags() & HA_NO_INDEX_ACCESS) == 0) {
-    records = best_path->num_output_rows;
+    records = best_path->num_output_rows();
     *path = best_path;
   }
 
@@ -814,7 +813,7 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
       Opt_trace_object trace_range_plan(trace, "range_access_plan");
       trace_basic_info(thd, best_path, &param, &trace_range_plan);
     }
-    trace_range_summary.add("rows_for_plan", best_path->num_output_rows)
+    trace_range_summary.add("rows_for_plan", best_path->num_output_rows())
         .add("cost_for_plan", best_path->cost)
         .add("chosen", true);
   }
@@ -836,9 +835,9 @@ int test_quick_select(THD *thd, MEM_ROOT *return_mem_root,
  */
 static AccessPath *get_ror_union_path(
     THD *thd, RANGE_OPT_PARAM *param, TABLE *table,
-    bool index_merge_intersect_allowed, enum_order interesting_order,
-    const MY_BITMAP *needed_fields, SEL_IMERGE *imerge, const double read_cost,
-    bool force_index_merge, Bounds_checked_array<AccessPath *> roru_read_plans,
+    bool index_merge_intersect_allowed, const MY_BITMAP *needed_fields,
+    SEL_IMERGE *imerge, const double read_cost, bool force_index_merge,
+    Bounds_checked_array<AccessPath *> roru_read_plans,
     AccessPath **range_scans, Opt_trace_object *trace_best_disjunct) {
   double roru_index_cost = 0.0;
   ha_rows roru_total_records = 0;
@@ -867,19 +866,19 @@ static AccessPath *get_ror_union_path(
       double scan_cost = 0.0;
       if (child_param.can_be_used_for_ror) {
         /* Ok, we have index_only cost, now get full rows scan cost */
-        scan_cost =
-            table->file
-                ->read_cost(child_param.index, 1, (*cur_child)->num_output_rows)
-                .total_cost();
+        scan_cost = table->file
+                        ->read_cost(child_param.index, 1,
+                                    (*cur_child)->num_output_rows())
+                        .total_cost();
         scan_cost += table->cost_model()->row_evaluate_cost(
-            (*cur_child)->num_output_rows);
+            (*cur_child)->num_output_rows());
       } else
         scan_cost = read_cost;
 
       AccessPath *prev_plan = *cur_child;
       if (!(*cur_roru_plan = get_best_ror_intersect(
-                thd, param, table, index_merge_intersect_allowed,
-                interesting_order, *tree_it, needed_fields, scan_cost,
+                thd, param, table, index_merge_intersect_allowed, *tree_it,
+                needed_fields, scan_cost,
                 /*force_index_merge_result=*/false, /*reuse_handler=*/false))) {
         if (child_param.can_be_used_for_ror)
           *cur_roru_plan = prev_plan;
@@ -887,9 +886,9 @@ static AccessPath *get_ror_union_path(
           return nullptr;
       }
       roru_index_cost += (*cur_roru_plan)->cost;
-      roru_total_records += (*cur_roru_plan)->num_output_rows;
+      roru_total_records += (*cur_roru_plan)->num_output_rows();
       roru_intersect_part *=
-          (*cur_roru_plan)->num_output_rows / table->file->stats.records;
+          (*cur_roru_plan)->num_output_rows() / table->file->stats.records;
     }
   }
 
@@ -951,7 +950,7 @@ static AccessPath *get_ror_union_path(
     AccessPath *path = new (param->return_mem_root) AccessPath;
     path->type = AccessPath::ROWID_UNION;
     path->cost = roru_total_cost;
-    path->num_output_rows = roru_total_records;
+    path->set_num_output_rows(roru_total_records);
     path->rowid_union().table = table;
     path->rowid_union().children = children;
     path->rowid_union().forced_by_hint = force_index_merge;
@@ -1038,10 +1037,9 @@ static AccessPath *get_ror_union_path(
 static AccessPath *get_best_disjunct_quick(
     THD *thd, RANGE_OPT_PARAM *param, TABLE *table,
     bool index_merge_union_allowed, bool index_merge_sort_union_allowed,
-    bool index_merge_intersect_allowed, enum_order interesting_order,
-    bool skip_records_in_range, const MY_BITMAP *needed_fields,
-    SEL_IMERGE *imerge, Unique::Imerge_cost_buf_type *imerge_cost_buff,
-    const double cost_est, Key_map *needed_reg) {
+    bool index_merge_intersect_allowed, bool skip_records_in_range,
+    const MY_BITMAP *needed_fields, SEL_IMERGE *imerge, const double cost_est,
+    Key_map *needed_reg) {
   double imerge_cost = 0.0;
   ha_rows cpk_scan_records = 0;
   ha_rows non_cpk_scan_records = 0;
@@ -1084,7 +1082,7 @@ static AccessPath *get_best_disjunct_quick(
                                   "tree in SEL_IMERGE"););
       Opt_trace_object trace_idx(trace);
       if (!(*cur_child = get_key_scans_params(
-                thd, param, *tree_it, true, false, interesting_order,
+                thd, param, *tree_it, true, false, ORDER_NOT_RELEVANT,
                 skip_records_in_range, read_cost, needed_reg))) {
         /*
           One of index scans in this index_merge is more expensive than entire
@@ -1113,9 +1111,9 @@ static AccessPath *get_best_disjunct_quick(
       const bool pk_is_clustered = table->file->primary_key_is_clustered();
       if (pk_is_clustered && child_param.index == table->s->primary_key) {
         cpk_scan = cur_child;
-        cpk_scan_records = (*cur_child)->num_output_rows;
+        cpk_scan_records = (*cur_child)->num_output_rows();
       } else
-        non_cpk_scan_records += (*cur_child)->num_output_rows;
+        non_cpk_scan_records += (*cur_child)->num_output_rows();
 
       trace_idx
           .add_utf8("index_to_merge", table->key_info[child_param.index].name)
@@ -1150,9 +1148,9 @@ static AccessPath *get_best_disjunct_quick(
       trace_best_disjunct.add("use_roworder_union", true)
           .add_alnum("cause", "always_cheaper_than_not_roworder_retrieval");
       return get_ror_union_path(
-          thd, param, table, index_merge_intersect_allowed, interesting_order,
-          needed_fields, imerge, read_cost, force_index_merge,
-          {range_scans, n_child_scans}, range_scans, &trace_best_disjunct);
+          thd, param, table, index_merge_intersect_allowed, needed_fields,
+          imerge, read_cost, force_index_merge, {range_scans, n_child_scans},
+          range_scans, &trace_best_disjunct);
     }
 
     if (cpk_scan) {
@@ -1187,17 +1185,8 @@ static AccessPath *get_best_disjunct_quick(
         .add_alnum("cause", "cost");
   } else {
     /* Add Unique operations cost */
-    size_t unique_calc_buff_size = Unique::get_cost_calc_buff_size(
-        non_cpk_scan_records, table->file->ref_length,
-        thd->variables.sortbuff_size);
-    if (imerge_cost_buff->size() < unique_calc_buff_size) {
-      *imerge_cost_buff = Unique::Imerge_cost_buf_type::Alloc(
-          param->temp_mem_root, unique_calc_buff_size);
-      if (imerge_cost_buff->array() == nullptr) return nullptr;
-    }
-
     const double dup_removal_cost = Unique::get_use_cost(
-        *imerge_cost_buff, (uint)non_cpk_scan_records, table->file->ref_length,
+        (uint)non_cpk_scan_records, table->file->ref_length,
         thd->variables.sortbuff_size, cost_model);
 
     trace_best_disjunct.add("cost_duplicate_removal", dup_removal_cost);
@@ -1212,14 +1201,15 @@ static AccessPath *get_best_disjunct_quick(
       imerge_path->type = AccessPath::INDEX_MERGE;
       imerge_path->index_merge().table = table;
       imerge_path->index_merge().forced_by_hint = force_index_merge;
+      imerge_path->index_merge().allow_clustered_primary_key_scan = true;
       imerge_path->index_merge().children =
           new (param->return_mem_root) Mem_root_array<AccessPath *>(
               param->return_mem_root, range_scans, range_scans + n_child_scans);
 
       // TODO(sgunders): init_cost is high in practice, so should not be zero.
       imerge_path->cost = imerge_cost;
-      imerge_path->num_output_rows = min<double>(
-          non_cpk_scan_records + cpk_scan_records, table->file->stats.records);
+      imerge_path->set_num_output_rows(min<double>(
+          non_cpk_scan_records + cpk_scan_records, table->file->stats.records));
       read_cost = imerge_cost;
     }
   }
@@ -1236,9 +1226,9 @@ static AccessPath *get_best_disjunct_quick(
   }
 
   AccessPath *roru = get_ror_union_path(
-      thd, param, table, index_merge_intersect_allowed, interesting_order,
-      needed_fields, imerge, read_cost, force_index_merge,
-      {roru_read_plans, n_child_scans}, range_scans, &trace_best_disjunct);
+      thd, param, table, index_merge_intersect_allowed, needed_fields, imerge,
+      read_cost, force_index_merge, {roru_read_plans, n_child_scans},
+      range_scans, &trace_best_disjunct);
   return (roru != nullptr) ? roru : imerge_path;
 }
 
@@ -1360,7 +1350,7 @@ static void debug_print_tree(SEL_ROOT *origin) {
 #endif  // !defined(NDEBUG)
 
 /**
-  Find the next different key value by skiping all the rows with the same key
+  Find the next different key value by skipping all the rows with the same key
   value.
 
   Implements a specialized loose index access method for queries
@@ -1368,7 +1358,7 @@ static void debug_print_tree(SEL_ROOT *origin) {
     SELECT [SUM|COUNT|AVG](DISTINCT a,...) FROM t
   This method comes to replace the index scan + Unique class
   (distinct selection) for loose index scan that visits all the rows of a
-  covering index instead of jumping in the begining of each group.
+  covering index instead of jumping in the beginning of each group.
   TODO: Placeholder function. To be replaced by a handler API call
 
   @param is_index_scan     hint to use index scan instead of random index read

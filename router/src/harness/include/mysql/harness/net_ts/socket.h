@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -70,7 +70,7 @@ namespace socket_option {
  * can be used to implement type safe socket options.
  *
  * @see socket_option::integer
- * @see socket_option::boolen
+ * @see socket_option::boolean
  */
 template <int Level, int Name, class T, class V = T>
 class option_base {
@@ -250,7 +250,7 @@ class socket_base {
     }
 
     /**
-     * set receipient of the message.
+     * set recipient of the message.
      */
     template <class endpoint_type>
     void set_recipient(const endpoint_type &ep) {
@@ -417,7 +417,10 @@ class basic_socket_impl_base {
       cancel();
 
       auto res = io_ctx_->socket_service()->close(native_handle());
-      if (res) native_handle_ = impl::socket::kInvalidSocket;
+
+      // after close() finished, the socket's state is undefined even if it
+      // failed. See "man close" on Linux.
+      native_handle_ = impl::socket::kInvalidSocket;
 
       return res;
     }

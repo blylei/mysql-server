@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -218,7 +218,7 @@ void Autorejoin_thread::execute_rejoin_process() {
     LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_FINISHED_AUTO_REJOIN,
                  num_attempts - 1UL, m_attempts, " not");
 
-    enable_server_read_mode(PSESSION_INIT_THREAD);
+    enable_server_read_mode();
     /*
       Only abort() if the auto-rejoin thread wasn't explicitly stopped, i.e.
       if someone called Autorejoin_thread::abort(), because that implies an
@@ -235,7 +235,7 @@ void Autorejoin_thread::execute_rejoin_process() {
           break;
         }
         case EXIT_STATE_ACTION_OFFLINE_MODE:
-          enable_server_offline_mode(PSESSION_INIT_THREAD);
+          enable_server_offline_mode();
           break;
       }
     }

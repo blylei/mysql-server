@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -29,9 +29,9 @@
 #include <stdexcept>
 #include <system_error>
 
-#include "common.h"
+#include <gtest/gtest.h>
+
 #include "dim.h"
-#include "gtest/gtest.h"
 #include "keyring/keyring_memory.h"
 #include "mysql/harness/filesystem.h"
 #include "random_generator.h"
@@ -326,7 +326,7 @@ TEST(KeyringManager, init_with_key_file) {
   }
   mysql_harness::reset_keyring();
 
-  // the orignal keyring should still be unchanged, but not the keyfile
+  // the original keyring should still be unchanged, but not the keyfile
   bool b1 = check_kf.check_unchanged();
   bool b2 = check_kr.check_unchanged();
   EXPECT_FALSE(b1);

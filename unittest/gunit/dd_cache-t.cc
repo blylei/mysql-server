@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -180,7 +180,8 @@ class CacheStorageTest : public ::testing::Test, public Test_MDL_context_owner {
   MDL_request m_request;
 
  private:
-  GTEST_DISALLOW_COPY_AND_ASSIGN_(CacheStorageTest);
+  CacheStorageTest(CacheStorageTest const &) = delete;
+  CacheStorageTest &operator=(CacheStorageTest const &) = delete;
 };
 
 template <typename T>

@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -317,14 +317,16 @@ bool migrate_table_to_dd(THD *thd, Ndb_dd_client *dd_client,
   (void)mysql_file_close(frm_file, MYF(0));
 
   // Create table share for tables
-  if (create_table_share_for_upgrade(thd, path, &share, &frm_context,
-                                     schema_name.c_str(), table_name.c_str(),
-                                     false)) {
+  int r = create_table_share_for_upgrade(thd, path, &share, &frm_context,
+                                         schema_name.c_str(),
+                                         table_name.c_str(), false);
+  if (r != 0) {
     thd_ndb->push_warning(ER_CANT_CREATE_TABLE_SHARE_FROM_FRM,
                           "Error in creating TABLE_SHARE from %s.frm file",
                           table_name.c_str());
-    ndb_log_error("Error in creating TABLE_SHARE from %s.frm file",
-                  table_name.c_str());
+    if (r == -1)
+      ndb_log_error("Error in creating TABLE_SHARE from %s.frm file",
+                    table_name.c_str());
     // Delete frm file
     mysql_file_delete(key_file_frm, index_file, MYF(0));
     return false;
@@ -421,15 +423,12 @@ bool migrate_table_to_dd(THD *thd, Ndb_dd_client *dd_client,
     return false;
   }
 
-  uint i = 0;
-  KEY *key_info = share.key_info;
-
   /*
     Mark all the keys visible and supported algorithm explicit.
     Unsupported algorithms will get fixed by prepare_key() call.
   */
-  key_info = share.key_info;
-  for (i = 0; i < share.keys; i++, key_info++) {
+  for (uint i = 0; i < share.keys; i++) {
+    KEY *key_info = &share.key_info[i];
     key_info->is_visible = true;
     /*
       Fulltext and Spatical indexes will get fixed by
@@ -458,7 +457,7 @@ bool migrate_table_to_dd(THD *thd, Ndb_dd_client *dd_client,
   uint key_count;
 
   // Foreign keys are handled at later stage by retrieving info from SE.
-  FOREIGN_KEY *dummy_fk_key_info = NULL;
+  FOREIGN_KEY *dummy_fk_key_info = nullptr;
   uint dummy_fk_key_count = 0;
 
   if (mysql_prepare_create_table(

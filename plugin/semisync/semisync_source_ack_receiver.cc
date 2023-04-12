@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -151,10 +151,8 @@ bool Ack_receiver::add_slave(THD *thd) {
           &slave.compress_ctx, algorithm,
           thd->get_protocol_classic()->get_compression_level());
   }
-  slave.is_leaving = false;
   slave.vio = thd->get_protocol_classic()->get_vio();
   slave.vio->mysql_socket.m_psi = nullptr;
-  slave.vio->read_timeout = 1;
 
   /* push_back() may throw an exception */
   try {
@@ -187,7 +185,7 @@ void Ack_receiver::remove_slave(THD *thd) {
   */
   for (it = m_slaves.begin(); it != m_slaves.end(); ++it) {
     if (it->thread_id == thd->thread_id()) {
-      it->is_leaving = true;
+      it->m_status = Slave::EnumStatus::leaving;
       m_slaves_changed = true;
       break;
     }
@@ -197,7 +195,8 @@ void Ack_receiver::remove_slave(THD *thd) {
     Wait till Ack_receiver::run() is done reading from the
     slave's socket.
   */
-  while ((it != m_slaves.end()) && (it->is_leaving) && (m_status == ST_UP)) {
+  while ((it != m_slaves.end()) &&
+         (it->m_status == Slave::EnumStatus::leaving) && (m_status == ST_UP)) {
     mysql_cond_wait(&m_cond, &m_mutex);
     /*
       In above cond_wait, we release and reacquire m_mutex.
@@ -231,7 +230,7 @@ inline void Ack_receiver::wait_for_slave_connection() {
   mysql_cond_wait(&m_cond, &m_mutex);
 }
 
-/* Auxilary function to initialize a NET object with given net buffer. */
+/* Auxiliary function to initialize a NET object with given net buffer. */
 static void init_net(NET *net, unsigned char *buff, unsigned int buff_len) {
   memset(net, 0, sizeof(NET));
   net->max_packet = buff_len;
@@ -250,10 +249,7 @@ void Ack_receiver::run() {
 
   init_net(&net, net_buff, REPLY_MESSAGE_MAX_LENGTH);
   NET_SERVER server_extn;
-  server_extn.m_user_data = nullptr;
-  server_extn.m_before_header = nullptr;
-  server_extn.m_after_header = nullptr;
-  server_extn.compress_ctx.algorithm = MYSQL_UNCOMPRESSED;
+  net_server_ext_init(&server_extn);
   net.extension = &server_extn;
 
   mysql_mutex_lock(&m_mutex);
@@ -315,8 +311,9 @@ void Ack_receiver::run() {
           if (likely(len != packet_error))
             repl_semisync->reportReplyPacket(slave_obj.server_id, net.read_pos,
                                              len);
-          else if (net.last_errno == ER_NET_READ_ERROR)
+          else if (net.last_errno == ER_NET_READ_ERROR) {
             listener.clear_socket_info(i);
+          }
         } while (net.vio->has_data(net.vio) && m_status == ST_UP);
       }
       i++;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2001, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2001, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,7 +35,7 @@
 #include "storage/myisam/myisamdef.h"
 #include "welcome_copyright_notice.h"
 
-static void usage() MY_ATTRIBUTE((noreturn));
+[[noreturn]] static void usage();
 static void complain(int val);
 static bool get_one_option(int, const struct my_option *, char *);
 

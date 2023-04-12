@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -125,7 +125,6 @@ int Recovery_endpoints::local_interfaces_ips(std::set<std::string> &local_ips) {
   DWORD retval = 0;
   PIP_ADAPTER_ADDRESSES addresses;
   PIP_ADAPTER_ADDRESSES curr_addresses;
-  ULONG number_of_interfaces = 0;
 
   out_buflen = WORKING_BUFFER_SIZE;
 

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+ Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License, version 2.0,
@@ -78,7 +78,10 @@ class TestRestApiEnable : public RouterComponentTest {
     set_globals();
 
     custom_port = port_pool_.get_next_available();
-    router_port = port_pool_.get_next_available();
+    router_port_rw = port_pool_.get_next_available();
+    router_port_ro = port_pool_.get_next_available();
+    router_port_x_rw = port_pool_.get_next_available();
+    router_port_x_ro = port_pool_.get_next_available();
 
     setup_paths();
   }
@@ -86,8 +89,11 @@ class TestRestApiEnable : public RouterComponentTest {
   ProcessWrapper &do_bootstrap(std::vector<std::string> additional_config) {
     std::vector<std::string> cmdline = {
         "--bootstrap=" + gr_member_ip + ":" + std::to_string(cluster_node_port),
-        "-d", temp_test_dir.name(), "--conf-base-port",
-        std::to_string(router_port)};
+        "-d",
+        temp_test_dir.name(),
+        "--conf-set-option=DEFAULT.logging_folder=" + get_logging_dir().str(),
+        "--conf-set-option=logger.level=DEBUG",
+    };
     std::move(std::begin(additional_config), std::end(additional_config),
               std::back_inserter(cmdline));
     auto &router_bootstrap = launch_router(cmdline, EXIT_SUCCESS);
@@ -322,35 +328,6 @@ class TestRestApiEnable : public RouterComponentTest {
     return result;
   }
 
-  void patch_config_file(const std::string &config_filename) {
-    // bootstrap does 'level=INFO', we need 'DEBUG'
-    // bootstrap sets logging_folder=..., we need where the ProcessManager
-    // expects it.
-
-    std::ifstream ifs;
-    std::stringstream ss;
-
-    ifs.open(config_filename);
-
-    std::string line;
-    while (std::getline(ifs, line)) {
-      if (line == "level=INFO") {
-        line = "level=DEBUG";
-      }
-      if (line.substr(0, sizeof("logging_folder") - 1) == "logging_folder") {
-        line = "logging_folder = " + get_logging_dir().str();
-      }
-      ss << line << "\n";
-    }
-
-    ifs.close();
-
-    std::ofstream ofs;
-
-    ofs.open(config_filename);
-    ofs << ss.str();
-  }
-
   ProcessWrapper &launch_router(
       const std::vector<std::string> &params, int expected_exit_code /*= 0*/,
       std::chrono::milliseconds wait_for_notify_ready = -1s,
@@ -369,7 +346,10 @@ class TestRestApiEnable : public RouterComponentTest {
   uint16_t cluster_node_port;
   uint16_t cluster_http_port;
   uint16_t custom_port;
-  uint16_t router_port;
+  uint16_t router_port_rw;
+  uint16_t router_port_ro;
+  uint16_t router_port_x_rw;
+  uint16_t router_port_x_ro;
   uint16_t default_rest_port{8443};
   ProcessWrapper *cluster_node;
 
@@ -537,14 +517,12 @@ TEST_F(TestRestApiEnable, ensure_rest_is_disabled) {
        cert_file_t::k_router_cert}));
   assert_rest_config(config_path, false);
 
-  patch_config_file(config_path.str());
-
   auto &router = ProcessManager::launch_router({"-c", config_path.str()});
 
   EXPECT_EQ(std::error_code{}, router.send_clean_shutdown_event());
   EXPECT_EQ(0, router.wait_for_exit());
 
-  EXPECT_THAT(router.get_full_logfile(),
+  EXPECT_THAT(router.get_logfile_content(),
               ::testing::Not(::testing::HasSubstr("rest_routing")));
 }
 
@@ -579,8 +557,6 @@ TEST_F(TestRestApiEnable, ensure_rest_works_on_custom_port) {
       {cert_file_t::k_ca_key, cert_file_t::k_ca_cert, cert_file_t::k_router_key,
        cert_file_t::k_router_cert}));
   assert_rest_config(config_path, true);
-
-  patch_config_file(config_path.str());
 
   ProcessManager::launch_router({"-c", config_path.str()});
 
@@ -666,7 +642,7 @@ TEST_P(OverlappingHttpsPort,
 
 INSTANTIATE_TEST_SUITE_P(
     CheckOverlappingHttpsPort, OverlappingHttpsPort,
-    ::testing::Values(&TestRestApiEnable::router_port,
+    ::testing::Values(&TestRestApiEnable::router_port_rw,
                       &TestRestApiEnable::cluster_node_port));
 
 /**
@@ -723,8 +699,6 @@ TEST_P(RestApiEnableUserCertificates, ensure_rest_works_with_user_certs) {
       {cert_file_t::k_router_key, cert_file_t::k_router_cert}));
   assert_rest_config(config_path, true);
   EXPECT_TRUE(certificate_files_not_changed(GetParam()));
-
-  patch_config_file(config_path.str());
 
   ProcessManager::launch_router({"-c", config_path.str()});
 
@@ -869,8 +843,6 @@ TEST_P(RestApiInvalidUserCerts,
             GetParam());
   assert_rest_config(config_path, true);
 
-  patch_config_file(config_path.str());
-
   auto &router = launch_router({"-c", config_path.str()}, EXIT_FAILURE);
   check_exit_code(router, EXIT_FAILURE);
 
@@ -880,7 +852,7 @@ TEST_P(RestApiInvalidUserCerts,
       "' or SSL certificate file '" +
       datadir_path.real_path().join(router_cert_filename).str() + "' failed";
   EXPECT_THAT(
-      router.get_full_logfile("mysqlrouter.log", get_logging_dir().str()),
+      router.get_logfile_content("mysqlrouter.log", get_logging_dir().str()),
       ::testing::HasSubstr(log_error));
 }
 
@@ -990,7 +962,10 @@ class TestRestApiEnableBootstrapFailover : public TestRestApiEnable {
     }
 
     cluster_node_port = gr_members[0].second;
-    router_port = port_pool_.get_next_available();
+    router_port_rw = port_pool_.get_next_available();
+    router_port_ro = port_pool_.get_next_available();
+    router_port_x_rw = port_pool_.get_next_available();
+    router_port_x_ro = port_pool_.get_next_available();
   }
 
  private:
@@ -1013,7 +988,20 @@ TEST_F(TestRestApiEnableBootstrapFailover,
        ensure_rest_works_after_node_failover) {
   const bool successful_failover = true;
   setup_mocks(successful_failover);
-  auto &router_bootstrap = do_bootstrap({/*default command line arguments*/});
+  const auto rest_port = port_pool_.get_next_available();
+  // since we are launching the Router after the bootstrap we can't allow
+  // default ports to be used
+  auto &router_bootstrap = do_bootstrap({
+      "--conf-set-option=http_server.port=" + std::to_string(rest_port),
+      "--conf-set-option=routing:bootstrap_rw.bind_port=" +
+          std::to_string(router_port_rw),
+      "--conf-set-option=routing:bootstrap_ro.bind_port=" +
+          std::to_string(router_port_ro),
+      "--conf-set-option=routing:bootstrap_x_rw.bind_port=" +
+          std::to_string(router_port_x_rw),
+      "--conf-set-option=routing:bootstrap_x_ro.bind_port=" +
+          std::to_string(router_port_x_ro),
+  });
   EXPECT_THAT(router_bootstrap.get_full_output(),
               ::testing::HasSubstr("trying to connect to"));
 
@@ -1022,11 +1010,9 @@ TEST_F(TestRestApiEnableBootstrapFailover,
        cert_file_t::k_router_cert}));
   assert_rest_config(config_path, true);
 
-  patch_config_file(config_path.str());
-
   ProcessManager::launch_router({"-c", config_path.str()});
 
-  assert_rest_works(default_rest_port);
+  assert_rest_works(rest_port);
 }
 
 /**

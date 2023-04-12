@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -41,8 +41,7 @@ class GRNotificationListener {
 
   using NotificationClb = std::function<void()>;
 
-  void setup(const std::vector<metadata_cache::ManagedInstance> &instances,
-             const mysqlrouter::TargetCluster &target_cluster,
+  void setup(const metadata_cache::ClusterTopology &cluster_topology,
              const NotificationClb &notification_clb);
 
  private:

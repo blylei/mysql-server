@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2009, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -20,6 +20,7 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
+#include "util/require.h"
 #include <ndb_global.h>
 
 #include <algorithm>
@@ -38,6 +39,7 @@
 
 #include "ndb_stacktrace.h"
 #include "ndbd.hpp"
+#include "main.hpp"
 
 #include <TransporterRegistry.hpp>
 
@@ -48,10 +50,11 @@
 #include <sys/processor.h>
 #endif
 
-#include <EventLogger.hpp>
-#include <OutputStream.hpp>
-#include <LogBuffer.hpp>
 #include <NdbGetRUsage.h>
+#include <ndb_openssl_evp.h>
+#include <EventLogger.hpp>
+#include <LogBuffer.hpp>
+#include <OutputStream.hpp>
 
 #define JAM_FILE_ID 484
 
@@ -187,13 +190,13 @@ compute_acc_32kpages(const ndb_mgm_configuration_iterator * p)
   if (accmem)
   {
     accmem /= GLOBAL_PAGE_SIZE;
-    
+
     Uint32 lqhInstances = 1;
     if (globalData.isNdbMtLqh)
     {
       lqhInstances = globalData.ndbMtLqhWorkers;
     }
-    
+
     accmem += lqhInstances * (32 / 4); // Added as safety in Configuration.cpp
   }
   return Uint32(accmem);
@@ -250,7 +253,7 @@ compute_acc_32kpages(const ndb_mgm_configuration_iterator * p)
  * This is a resource that is used for the disk page buffer. It cannot
  * be overallocated. Its size is calculated based on the config variable
  * DiskPageBufferMemory.
- * 
+ *
  * RG_SCHEMA_TRANS_MEMORY:
  * This is a resource that is set to a minimum of 2 MByte. It can be
  * overallocated at any size as long as there is still memory
@@ -295,9 +298,11 @@ init_global_memory_manager(EmulatorData &ed, Uint32 *watchCounter)
 {
   const ndb_mgm_configuration_iterator * p =
     ed.theConfiguration->getOwnConfigIterator();
-  if (p == 0)
+  if (p == nullptr)
   {
-    abort();
+    g_eventLogger->alert("Failed to get node config iterator, "
+                         "exiting.");
+    return -1;
   }
 
   Uint32 numa = 0;
@@ -586,7 +591,7 @@ init_global_memory_manager(EmulatorData &ed, Uint32 *watchCounter)
   {
     /**
      * Request extra undo buffer memory to be allocated when
-     * InitialLogFileGroup is specifed in config.
+     * InitialLogFileGroup is specified in config.
      *
      *  - Use default size or the value specified by the
      *    undo_buffer_size= key.
@@ -741,6 +746,8 @@ ndbd_exit(int code)
   if (code < 0)
     code = 255;
 
+  NdbSleep_MilliSleep(1);
+
 // gcov will not produce results when using _exit
 #ifdef HAVE_GCOV
   exit(code);
@@ -883,9 +890,6 @@ catchsigs(bool foreground){
 #ifdef SIGBUS
     SIGBUS,
 #endif
-#ifdef SIGCHLD
-    SIGCHLD,
-#endif
     SIGFPE,
     SIGILL,
 #ifdef SIGIO
@@ -898,6 +902,13 @@ catchsigs(bool foreground){
   };
 
   static const int signals_ignore[] = {
+#ifdef SIGCHLD
+    /**
+     * Ignore SIGCHLD  - we have no children,
+     * but may inherit others' children
+     */
+    SIGCHLD,
+#endif
 #ifdef _WIN32
     SIGINT
 #else
@@ -961,7 +972,6 @@ void* async_log_func(void* args)
   {
     part_bytes = 0;
     bytes_printed = 0;
-
     if((bytes = logBuf->get(buf, get_bytes)))
     {
       fwrite(buf, bytes, 1, f);
@@ -979,7 +989,7 @@ void* async_log_func(void* args)
   size_t lost_count = logBuf->getLostCount();
   if(lost_count)
   {
-    fprintf(f, "\n*** %lu BYTES LOST ***\n", (unsigned long)lost_count);
+    fprintf(f, LostMsgHandler::LOST_BYTES_FMT, lost_count);
     fflush(f);
   }
 
@@ -1004,6 +1014,16 @@ static void log_memusage(const char* where=NULL)
 #endif
 }
 
+void stop_async_log_func(NdbThread *thr, ThreadData& thr_args)
+{
+  if (thr)
+  {
+    void *dummy_return_status;
+    thr_args.stop = true;
+    NdbThread_WaitFor(thr, &dummy_return_status);
+  }
+}
+
 void
 ndbd_run(bool foreground, int report_fd,
          const char* connect_str, int force_nodeid, const char* bind_address,
@@ -1025,14 +1045,12 @@ ndbd_run(bool foreground, int report_fd,
     logBuf,
     false
   };
-
   // Create log thread.
   log_threadvar = NdbThread_Create(async_log_func,
                        (void**)&thread_args,
                        0,
                        (char*)"async_log_thread",
                        NDB_THREAD_PRIO_MEAN);
-
 #ifdef _WIN32
   {
     char shutdown_event_name[32];
@@ -1044,7 +1062,8 @@ ndbd_run(bool foreground, int report_fd,
     {
       g_eventLogger->error("Failed to create shutdown event, error: %d",
                            GetLastError());
-     ndbd_exit(1);
+      stop_async_log_func(log_threadvar, thread_args);
+      ndbd_exit(1);
     }
 
     HANDLE thread = CreateThread(NULL, 0, &shutdown_thread, NULL, 0, NULL);
@@ -1052,6 +1071,7 @@ ndbd_run(bool foreground, int report_fd,
     {
       g_eventLogger->error("couldn't start shutdown thread, error: %d",
                            GetLastError());
+      stop_async_log_func(log_threadvar, thread_args);
       ndbd_exit(1);
     }
   }
@@ -1070,6 +1090,8 @@ ndbd_run(bool foreground, int report_fd,
     {
       g_eventLogger->error("Failed to open stream for reporting "
                            "to angel, error: %d (%s)", errno, strerror(errno));
+
+      stop_async_log_func(log_threadvar, thread_args);
       ndbd_exit(-1);
     }
   }
@@ -1082,6 +1104,7 @@ ndbd_run(bool foreground, int report_fd,
       g_eventLogger->error("Failed to open stream for reporting to "
                            "'%s', error: %d (%s)", dev_null, errno,
                            strerror(errno));
+      stop_async_log_func(log_threadvar, thread_args);
       ndbd_exit(-1);
     }
   }
@@ -1111,6 +1134,7 @@ ndbd_run(bool foreground, int report_fd,
   if(!theConfig->init(no_start, initial, initialstart))
   {
     g_eventLogger->error("Failed to init Configuration");
+    stop_async_log_func(log_threadvar, thread_args);
     ndbd_exit(-1);
   }
 
@@ -1150,7 +1174,10 @@ ndbd_run(bool foreground, int report_fd,
     run-time environment
   */
   if (get_multithreaded_config(globalEmulatorData))
+  {
+    stop_async_log_func(log_threadvar, thread_args);
     ndbd_exit(-1);
+  }
   systemInfo(* theConfig, * theConfig->m_logLevel);
 
   /**
@@ -1173,13 +1200,53 @@ ndbd_run(bool foreground, int report_fd,
     Uint32 watchCounter;
     watchCounter = 9;           //  Means "doing allocation"
     globalEmulatorData.theWatchDog->registerWatchedThread(&watchCounter, 0);
-    if (init_global_memory_manager(globalEmulatorData, &watchCounter))
+    if (init_global_memory_manager(globalEmulatorData, &watchCounter) != 0)
+    {
+      stop_async_log_func(log_threadvar, thread_args);
       ndbd_exit(1);
+    }
     globalEmulatorData.theWatchDog->unregisterWatchedThread(0);
   }
   g_eventLogger->info("Memory Allocation for global memory pools Completed");
 
   log_memusage("Global memory pools allocated");
+
+  const ndb_mgm_configuration_iterator *p =
+      globalEmulatorData.theConfiguration->getOwnConfigIterator();
+  require(p != nullptr);
+
+  bool have_password_option = g_filesystem_password_state.have_password_option();
+  Uint32 encrypted_file_system = 0;
+  ndb_mgm_get_int_parameter(p, CFG_DB_ENCRYPTED_FILE_SYSTEM,
+                            &encrypted_file_system);
+  if (have_password_option && encrypted_file_system == 0)
+  {
+    g_eventLogger->warning("Data node is not configured with "
+        "EncryptedFileSystem=1, filesystem password will be ignored");
+  }
+  if (!have_password_option && encrypted_file_system == 1)
+  {
+    g_eventLogger->info("Data node configured to have encryption "
+                         "but password not provided");
+    ndbd_exit(-1);
+  }
+
+  if (have_password_option && encrypted_file_system == 1)
+  {
+    const char *pwd = g_filesystem_password_state.get_password();
+    size_t pwd_size = g_filesystem_password_state.get_password_length();
+    if(pwd_size <=0)
+    {
+      g_eventLogger->info("Invalid filesystem password, "
+          "empty password not allowed");
+      ndbd_exit(-1);
+    }
+
+    memcpy(globalData.filesystemPassword, pwd, pwd_size);
+    globalData.filesystemPassword[pwd_size] = '\0';
+    globalData.filesystemPasswordLength = pwd_size;
+    require(globalData.filesystemPasswordLength> 0);
+  }
 
   /**
     Initialise the data of the run-time environment, this prepares the
@@ -1270,8 +1337,10 @@ ndbd_run(bool foreground, int report_fd,
   g_eventLogger->info("Starting Sending and Receiving services");
   globalTransporterRegistry.startSending();
   globalTransporterRegistry.startReceiving();
-  if (!globalTransporterRegistry.start_service(*globalEmulatorData.m_socket_server)){
+  if (!globalTransporterRegistry.start_service(*globalEmulatorData.m_socket_server))
+  {
     g_eventLogger->info("globalTransporterRegistry.start_service() failed");
+    stop_async_log_func(log_threadvar, thread_args);
     ndbd_exit(-1);
   }
   // Re-use the mgm handle as a transporter
@@ -1284,6 +1353,7 @@ ndbd_run(bool foreground, int report_fd,
   if (pTrp == 0)
   {
     g_eventLogger->info("globalTransporterRegistry.start_clients() failed");
+    stop_async_log_func(log_threadvar, thread_args);
     ndbd_exit(-1);
   }
   NdbThread* pSockServ = globalEmulatorData.m_socket_server->startServer();
@@ -1331,10 +1401,8 @@ ndbd_run(bool foreground, int report_fd,
    * Stopping the log thread is done at the very end since the
    * data node logs should be available until complete shutdown.
    */
-  void* dummy_return_status;
-  thread_args.stop = true;
   logBuf->stop();
-  NdbThread_WaitFor(log_threadvar, &dummy_return_status);
+  stop_async_log_func(log_threadvar, thread_args);
   globalEmulatorData.theConfiguration->removeThread(log_threadvar);
   NdbThread_Destroy(&log_threadvar);
   delete logBuf;
@@ -1342,8 +1410,7 @@ ndbd_run(bool foreground, int report_fd,
   ndbd_exit(0);
 }
 
-
-extern "C" bool opt_core;
+extern bool opt_core;
 
 // instantiated and updated in NdbcntrMain.cpp
 extern Uint32 g_currentStartPhase;

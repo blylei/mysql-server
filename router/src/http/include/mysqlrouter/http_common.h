@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -54,7 +54,7 @@
 // http_common.cc
 
 /**
- * `libevent` global state managment
+ * `libevent` global state management
  */
 class HTTP_COMMON_EXPORT Event {
  public:
@@ -102,6 +102,7 @@ MY_COMPILER_DIAGNOSTIC_PUSH()
 // TODO(lkotula) Use proper 64bit/32bit signed/unsigned type based on platform.
 // 'initializing': truncation of constant value.
 MY_COMPILER_MSVC_DIAGNOSTIC_IGNORE(4309)
+MY_COMPILER_CLANG_DIAGNOSTIC_IGNORE("-Wconstant-conversion")
 const int kEventBaseInvalidSocket = INVALID_SOCKET;
 MY_COMPILER_DIAGNOSTIC_POP()
 

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -2101,7 +2101,7 @@ runGCPStallDuringBackup(NDBT_Context* ctx, NDBT_Step* step)
    * avoid Backup weirdness around 3 GCIs
    * We then cause GCP itself to stall
    * We then wait a little longer
-   * We then unstall the backup scan and GCP stall
+   * We then uninstall the backup scan and GCP stall
    */
 
   g_err << stepNo << " : stalling backup scan" << endl;

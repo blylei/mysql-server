@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2013, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,7 +56,8 @@ class ThreadManagerTest : public ::testing::Test {
   Global_THD_manager *thd_manager;
 
  private:
-  GTEST_DISALLOW_COPY_AND_ASSIGN_(ThreadManagerTest);
+  ThreadManagerTest(ThreadManagerTest const &) = delete;
+  ThreadManagerTest &operator=(ThreadManagerTest const &) = delete;
 };
 
 enum TEST_TYPE { TEST_WAIT = 0, TEST_TIMED_WAIT = 1 };

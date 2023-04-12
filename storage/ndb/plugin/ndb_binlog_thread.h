@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -53,6 +53,54 @@ class Ndb_binlog_thread : public Ndb_component {
 
   // Holds reference to share for ndb_apply_status table
   NDB_SHARE *m_apply_status_share{nullptr};
+
+  class Cache_spill_checker {
+    // Binlog cache disk use
+    ulong disk_use{0};
+
+    // Mask to bound warnings of disk spills by the binlog injector thread
+    static constexpr uint32 freq_mask = 0x3FE1;
+
+    /**
+       Checks if val is in the mask. If val is greater than the
+       absolute value of the mask, then check that val is a multiple
+       of mask.
+
+       @param    val    Value to test
+       @param    mask   Bit mask to test against
+       @return          True if val is present in mask or is in the
+       boundary, false otherwise
+    */
+    bool is_on_significant_boundary(uint32 val, uint32 mask) const {
+      if (val > mask) return val % mask == 0;
+      return val == (val & mask);
+    }
+
+   public:
+    // Counter for binlog trx commits that had disk spills
+    uint32 m_disk_spills{0};
+
+    /**
+       @brief Check if a disk spill occurred and that the occurence is
+       not rate limited. Save the value for next test.
+
+       @param value     The number of binlog disk use across all thread caches
+
+       @return          True if disk spills occurred and the occurrence is not
+                        rate limited. False otherwise.
+     */
+    bool check_disk_spill(ulong value) {
+      if (value - disk_use == 0) {
+        // No disk spill
+        return false;
+      }
+      disk_use = value;
+      m_disk_spills++;
+      return is_on_significant_boundary(m_disk_spills, freq_mask);
+    }
+
+  } m_cache_spill_checker;
+
   bool acquire_apply_status_reference();
   void release_apply_status_reference();
 
@@ -248,6 +296,17 @@ class Ndb_binlog_thread : public Ndb_component {
   void dbug_sync_setting() const;
 #endif
 
+  /**
+    @brief The binlog injector thread is not a client thread, but has its own
+    THD object which is used when writing to the binlog. Thus its thread-local
+    variables controlling how binlog is written need to be updated from global
+    values so that the changed settings will take effect during next epoch
+    transaction.
+
+    @param thd Thread handle
+   */
+  void fix_per_epoch_trans_settings(THD *thd);
+
   // Functions for handling received events
   int handle_data_get_blobs(const TABLE *table,
                             const NdbValue *const value_array,
@@ -274,7 +333,7 @@ class Ndb_binlog_thread : public Ndb_component {
   void inject_table_map(injector_transaction &trans, Ndb *ndb) const;
   void commit_trans(injector_transaction &trans, THD *thd, Uint64 current_epoch,
                     ndb_binlog_index_row *rows, unsigned trans_row_count,
-                    unsigned replicated_row_count) const;
+                    unsigned replicated_row_count);
 };
 
 /*

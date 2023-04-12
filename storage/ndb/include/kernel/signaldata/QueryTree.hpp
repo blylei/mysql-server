@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2004, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2004, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -53,7 +53,7 @@ struct QueryNode  // Effectively used as a base class for QN_xxxNode
   static const QueryNode* nextQueryNode(const QueryNode* node)
   {
     const Uint32 len = QueryNode::getLength(node->len);
-    return (const QueryNode*)((Uint32*)node + len);
+    return (const QueryNode *)((const Uint32 *)node + len);
   }
 
   static void setOpLen(Uint32 &d, Uint32 o, Uint32 l) { d = (l << 16) | o;}
@@ -293,7 +293,7 @@ struct QN_ScanIndexNode_v1
     // Do pattern contain parameters
     SI_PRUNE_PARAMS = 0x20000,
 
-    // Is prune pattern dependant on parent key (or only on parameters / constants)
+    // Is prune pattern dependent on parent key (or only on parameters / constants)
     SI_PRUNE_LINKED = 0x40000,
 
     // Should it be parallel scan (can also be set as in parameters)
@@ -369,7 +369,7 @@ struct QN_ScanFragNode // Note: Same layout as old QN_ScanIndexNode_v1
     // Do pattern contain parameters
     SF_PRUNE_PARAMS = 0x20000,
 
-    // Is prune pattern dependant on parent key (or only on parameters / constants)
+    // Is prune pattern dependent on parent key (or only on parameters / constants)
     SF_PRUNE_LINKED = 0x40000,
 
     // Should it be parallel scan (can also be set as in parameters)
@@ -503,7 +503,7 @@ struct QueryPattern
 
   /**
    * Move to grand-parent no
-   * (0 == imediate parent)
+   * (0 == immediate parent)
    */
   static Uint32 parent(Uint32 no) { return (P_PARENT << 16) | no;}
 };

@@ -1,4 +1,4 @@
-# Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -118,6 +118,8 @@ usr/lib/mysql/plugin/debug/component_test_host_application_signal.so
 usr/lib/mysql/plugin/debug/component_test_mysql_current_thread_reader.so
 usr/lib/mysql/plugin/debug/component_test_mysql_runtime_error.so
 usr/lib/mysql/plugin/debug/component_test_component_deinit.so
+usr/lib/mysql/plugin/debug/component_test_mysql_command_services.so
+usr/lib/mysql/plugin/debug/test_services_command_services.so
 usr/lib/mysql/plugin/debug/component_udf_reg_3_func.so
 usr/lib/mysql/plugin/debug/component_udf_reg_avg_func.so
 usr/lib/mysql/plugin/debug/component_udf_reg_int_func.so
@@ -127,6 +129,7 @@ usr/lib/mysql/plugin/debug/component_udf_reg_real_func.so
 usr/lib/mysql/plugin/debug/component_udf_unreg_3_func.so
 usr/lib/mysql/plugin/debug/component_udf_unreg_int_func.so
 usr/lib/mysql/plugin/debug/component_udf_unreg_real_func.so
+usr/lib/mysql/plugin/debug/conflicting_variables.so
 usr/lib/mysql/plugin/debug/daemon_example.ini
 usr/lib/mysql/plugin/debug/ha_example.so
 usr/lib/mysql/plugin/debug/ha_mock.so
@@ -185,6 +188,8 @@ usr/lib/mysql/plugin/debug/component_test_audit_api_message.so
 usr/lib/mysql/plugin/debug/component_test_udf_services.so
 usr/lib/mysql/plugin/debug/component_test_mysql_system_variable_set.so
 usr/lib/mysql/plugin/debug/component_test_table_access.so
+usr/lib/mysql/plugin/debug/component_test_sensitive_system_variables.so
+usr/lib/mysql/plugin/debug/component_test_status_var_reader.so
 ")
 
 IF (DEB_PRODUCT STREQUAL "commercial")
@@ -206,6 +211,8 @@ usr/lib/mysql/plugin/debug/thread_pool.so
 usr/lib/mysql/plugin/debug/firewall.so
 usr/lib/mysql/plugin/debug/authentication_fido.so
 usr/lib/mysql/plugin/debug/component_keyring_encrypted_file.so
+usr/lib/mysql/plugin/debug/component_keyring_oci.so
+usr/lib/mysql/plugin/debug/component_enterprise_encryption.so
 ")
   ENDIF()
   IF (DEB_AWS_SDK)

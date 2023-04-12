@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -61,19 +61,45 @@ class Consensus_leaders_handler : public Group_event_observer {
    * @brief Sets the newly elected primary as the single preferred "consensus
    * leader" in GCS.
    *
-   * @param primary_uuid
-   * @param primary_changed
-   * @param election_mode
-   * @param error
-   * @return int
+   * @param primary_uuid the elected primary
+   * @param primary_change_status if the primary changed after the election
+   * @param election_mode what was the election mode
+   * @param error if there was and error on the process
+   * @return int 0 on success
    */
-  int after_primary_election(std::string primary_uuid, bool primary_changed,
-                             enum_primary_election_mode election_mode,
-                             int error) override;
+  int after_primary_election(
+      std::string primary_uuid,
+      enum_primary_election_primary_change_status primary_change_status,
+      enum_primary_election_mode election_mode, int error) override;
 
   int before_message_handling(const Plugin_gcs_message &message,
                               const std::string &message_origin,
                               bool *skip_message) override;
+
+  /**
+   * @brief Set the appropriate "consensus leaders" in GCS.
+   *
+   * The "consensus leaders" are set according to the following rules:
+   * 0) If the the return result  of allow_single_leader_getter lambda is false
+   *    :do nothing
+   * a) @c communication_protocol is < 8.0.27: do nothing
+   * b) @c communication_protocol is >= 8.0.27:
+   *    b1) @c primary_mode is SINGLE and @c my_role is PRIMARY: set myself,
+   *        @c my_gcs_id, as the single preferred "consensus leader"
+   *    b2) @c primary_mode is SINGLE and @c my_role is SECONDARY: do nothing
+   *    b3) @c primary_mode is MULTI: set everyone as "consensus leader"
+   *
+   * @param communication_protocol
+   * @param is_single_primary_mode
+   * @param role
+   * @param my_gcs_id
+   * @param allow_single_leader_getter
+   */
+  void set_consensus_leaders(Member_version const &communication_protocol,
+                             bool is_single_primary_mode,
+                             Group_member_info::Group_member_role role,
+                             Gcs_member_identifier const &my_gcs_id,
+                             std::function<bool()> allow_single_leader_getter);
 
   /**
    * @brief Set the appropriate "consensus leaders" in GCS.
@@ -85,6 +111,9 @@ class Consensus_leaders_handler : public Group_event_observer {
    *        @c my_gcs_id, as the single preferred "consensus leader"
    *    b2) @c primary_mode is SINGLE and @c my_role is SECONDARY: do nothing
    *    b3) @c primary_mode is MULTI: set everyone as "consensus leader"
+   *
+   * It inserts a default implementation of allow_single_leader_getter that
+   * verifies the current value of group_replication_paxos_single_leader var
    *
    * @param communication_protocol
    * @param is_single_primary_mode

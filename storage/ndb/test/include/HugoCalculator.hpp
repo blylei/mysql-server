@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,7 +30,7 @@
 /* *************************************************************
  * HugoCalculator
  *
- *  Comon class for the Hugo test suite, provides the functions 
+ *  Common class for the Hugo test suite, provides the functions 
  *  that is used for calculating values to load in to table and 
  *  also knows how to verify a row that's been read from db 
  *

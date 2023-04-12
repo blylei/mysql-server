@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -58,7 +58,7 @@ static_assert(Codec<frame::Frame<message::client::StmtReset>>({0, {1}}, {})
 static_assert(Codec<frame::Frame<message::client::StmtFetch>>({0, {1, 2}}, {})
                   .size() == 4 + 1 + 4 + 4);
 
-static_assert(Codec<frame::Frame<message::client::StmtSetOption>>({0, {1}}, {})
+static_assert(Codec<frame::Frame<message::client::SetOption>>({0, {1}}, {})
                   .size() == 4 + 1 + 2);
 
 // Frame::Quit

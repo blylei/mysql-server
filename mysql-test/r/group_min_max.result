@@ -2561,7 +2561,7 @@ EXPLAIN (SELECT max(b), a FROM t1 GROUP BY a) UNION
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	range	a	a	5	NULL	11	100.00	Using index for group-by
 2	UNION	t1	NULL	range	a	a	5	NULL	11	100.00	Using index for group-by
-NULL	UNION RESULT	<union1,2>	NULL	ALL	NULL	NULL	NULL	NULL	NULL	NULL	Using temporary
+3	UNION RESULT	<union1,2>	NULL	ALL	NULL	NULL	NULL	NULL	NULL	NULL	Using temporary
 Warnings:
 Note	1003	/* select#1 */ select max(`test`.`t1`.`b`) AS `max(b)`,`test`.`t1`.`a` AS `a` from `test`.`t1` group by `test`.`t1`.`a` union /* select#2 */ select max(`test`.`t1`.`b`) AS `max(b)`,`test`.`t1`.`a` AS `a` from `test`.`t1` group by `test`.`t1`.`a`
 EXPLAIN SELECT (SELECT max(b) FROM t1 GROUP BY a HAVING a < 2) x
@@ -4537,3 +4537,22 @@ INSERT INTO t1 VALUES(''),('');
 SELECT 1 FROM t1 WHERE f1=UUID() GROUP BY f1 LIMIT 1;
 1
 DROP TABLE t1;
+#
+# Bug#33139598: Assertion `table_independent_conds == nullptr' failed.
+#
+CREATE TABLE t1 (f1 INTEGER, KEY(f1));
+INSERT INTO t1 VALUES (1), (2);
+CREATE FUNCTION f()
+RETURNS INT DETERMINISTIC
+BEGIN
+SET @f:=1;
+RETURN @f;
+END$
+SELECT MAX(f1) FROM t1 WHERE f() = 1;
+MAX(f1)
+2
+SELECT MAX(f1) FROM t1 WHERE f() = 0;
+MAX(f1)
+NULL
+DROP TABLE t1;
+DROP FUNCTION f;

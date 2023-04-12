@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -217,7 +217,7 @@ class Security_context {
   /**
     Check if a an account has been assigned to the security context
 
-    The account assigment to the security context is always executed in the
+    The account assignment to the security context is always executed in the
     following order:
     1) assign user's name to the context
     2) assign user's hostname to the context
@@ -315,7 +315,7 @@ class Security_context {
   std::pair<bool, bool> fetch_global_grant(const ACL_USER &acl_user,
                                            const std::string &privilege,
                                            bool cumulative = false);
-  bool has_table_access(ulong priv, TABLE_LIST *table);
+  bool has_table_access(ulong priv, Table_ref *table);
 
  private:
   /**
@@ -371,7 +371,6 @@ class Security_context {
   bool m_password_expired;
   List_of_auth_id_refs m_active_roles;
   Acl_map *m_acl_map;
-  int m_map_checkout_count;
   /**
     True if this account can't be logged into.
   */

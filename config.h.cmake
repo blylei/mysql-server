@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2009, 2022, Oracle and/or its affiliates.
  
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License, version 2.0,
@@ -201,6 +201,7 @@
 /* This should mean case insensitive file system */
 #cmakedefine FN_NO_CASE_SENSE 1
 #cmakedefine APPLE_ARM 1
+#cmakedefine HAVE_BUILD_ID_SUPPORT
 
 /*
  * From main CMakeLists.txt
@@ -358,5 +359,8 @@
 
 /* ARM crc32 support */
 #cmakedefine HAVE_ARMV8_CRC32_INTRINSIC @HAVE_ARMV8_CRC32_INTRINSIC@
+
+/* sasl_client_done support */
+#cmakedefine SASL_CLIENT_DONE_SUPPORTED @SASL_CLIENT_DONE_SUPPORTED@
 
 #endif

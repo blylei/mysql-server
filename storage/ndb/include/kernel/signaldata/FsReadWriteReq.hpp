@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -139,6 +139,9 @@ private:
   static Uint32 getPartialReadFlag(UintR opFlag);
   static void setPartialReadFlag(UintR & opFlag, Uint32 flag);
 };
+
+DECLARE_SIGNAL_SCOPE(GSN_FSREADREQ, Local);
+DECLARE_SIGNAL_SCOPE(GSN_FSWRITEREQ, Local);
 
 /**
  * Operation flag

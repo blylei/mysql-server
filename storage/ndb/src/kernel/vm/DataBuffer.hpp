@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 #ifndef DATA_BUFFER_HPP
 #define DATA_BUFFER_HPP
 
+#include "util/require.h"
 #include <ndb_limits.h>
 #include <ErrorReporter.hpp>
 #include <NdbOut.hpp>
@@ -225,7 +226,7 @@ protected:
 
 private:
   /**
-   * This is NOT a public method, since the intension is that the import
+   * This is NOT a public method, since the intention is that the import
    * method using iterators will be more effective in the future
    */
   bool import(Uint32 pos, const Uint32* src, Uint32 len);

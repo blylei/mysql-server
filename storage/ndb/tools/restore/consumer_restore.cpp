@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2004, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2004, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -1046,6 +1046,19 @@ BackupRestore::get_table(const TableS & tableS){
     */
     m_cache.m_new_table = tab;
   }
+  else if (m_with_apply_status &&
+           (strcmp(tab->getName(), NDB_APPLY_TABLE) == 0 ||
+            strcmp(tab->getName(), NDB_REP_DB "/def/" NDB_APPLY_TABLE) == 0))
+  {
+    /*
+      Special case needed as ndb_apply_status is a 'system table',
+      and so not pre-loaded into the m_new_tables array.
+    */
+    NdbDictionary::Dictionary* dict = m_ndb->getDictionary();
+    m_ndb->setDatabaseName(NDB_REP_DB);
+    m_ndb->setSchemaName("def");
+    m_cache.m_new_table = dict->getTable(NDB_APPLY_TABLE);
+  }
   else if((cnt = sscanf(tab->getName(), "%[^/]/%[^/]/NDB$BLOB_%d_%d", 
                         db, schema, &id1, &id2)) == 4){
     m_ndb->setDatabaseName(db);
@@ -1087,38 +1100,21 @@ BackupRestore::prepare_staging(const TableS & tableS)
     return false;
   }
   stagingTable->setName(table_name.c_str());
+  m_ndb->setDatabaseName(db_name.c_str());
+  m_ndb->setSchemaName(schema_name.c_str());
 
-  int retries;
-  for (retries = 0; retries < MAX_RETRIES; retries++)
-  {
-    m_ndb->setDatabaseName(db_name.c_str());
-    m_ndb->setSchemaName(schema_name.c_str());
-    if (dict->createTable(*stagingTable) != 0)
-    {
-      const NdbError& error = dict->getNdbError();
-      if (error.status != NdbError::TemporaryError)
-      {
-        restoreLogger.log_error("Error: Failed to create staging source %s: %u: %s",
-                                 tablename, error.code, error.message);
-        return false;
-      }
-      restoreLogger.log_error("Temporary: Failed to create staging source %s: %u: %s",
-                                 tablename, error.code, error.message);
-      int createdelay = 100 + retries * 300;
-      restoreLogger.log_info("Sleeping %u ms", createdelay);
-      NdbSleep_MilliSleep(createdelay);
-      continue;
-    }
-    restoreLogger.log_info("Created staging source %s", tablename);
-    break;
+  restoreLogger.log_debug("Creating table %s", table_name.c_str());
+  if (!ndbapi_dict_operation_retry(
+          [stagingTable](NdbDictionary::Dictionary *dict) {
+            return dict->createTable(*stagingTable);
+          },
+          dict)) {
+    const NdbError &error = dict->getNdbError();
+    restoreLogger.log_error("Error: Failed to create staging source %s: %u: %s",
+                            tablename, error.code, error.message);
+    return false;
   }
-
-  if (retries == MAX_RETRIES)
-  {
-      restoreLogger.log_error("Create table %s "
-          ": too many temporary errors: %u", tablename, MAX_RETRIES);
-      return false;
-  }
+  restoreLogger.log_info("Created staging source %s", tablename);
 
   const NdbDictionary::Table* tab = dict->getTable(table_name.c_str());
   if (tab == NULL)
@@ -1223,37 +1219,21 @@ BackupRestore::finalize_staging(const TableS & tableS)
                             stablename, ttablename, MAX_RETRIES);
     return false;
   }
-  for (retries = 0; retries < MAX_RETRIES; retries++)
-  {
-    // dropTable(const Table&) is not defined ...
-    m_ndb->setDatabaseName(sdb_name.c_str());
-    m_ndb->setSchemaName(sschema_name.c_str());
-    if (dict->dropTable(stable_name.c_str()) != 0)
-    {
-      const NdbError& error = dict->getNdbError();
-      if (error.status != NdbError::TemporaryError)
-      {
-        restoreLogger.log_error("Error: Failed to drop staging source %s: %u: %s",
-            stablename, error.code, error.message);
-        return false;
-      }
-      restoreLogger.log_error("Temporary: Failed to drop staging source %s: %u: %s",
-            stablename, error.code, error.message);
 
-      int dropdelay = 100 + retries * 300;
-      restoreLogger.log_info("Sleeping %u ms", dropdelay);
-      NdbSleep_MilliSleep(dropdelay);
-      continue;
-    }
-    restoreLogger.log_info("Dropped staging source %s", stablename);
-    break;
-  }
-  if (retries == MAX_RETRIES)
-  {
-    restoreLogger.log_error("Move data %s to %s: too many temporary errors: %u",
-                            stablename, ttablename, MAX_RETRIES);
+  m_ndb->setDatabaseName(sdb_name.c_str());
+  m_ndb->setSchemaName(sschema_name.c_str());
+  const char *stableName = stable_name.c_str();
+  if (!ndbapi_dict_operation_retry(
+          [stableName](NdbDictionary::Dictionary *dict) {
+            return dict->dropTable(stableName);
+          },
+          dict)) {
+    restoreLogger.log_error("Error: Failed to drop staging source %s: %u: %s",
+                            stablename, dict->getNdbError().code,
+                            dict->getNdbError().message);
     return false;
   }
+  restoreLogger.log_info("Dropped staging source %s", stablename);
 
   /* Replace staging table with real target table in m_new_tables */
   const Uint32 orig_table_id = tableS.m_dictTable->getTableId();
@@ -1354,35 +1334,17 @@ BackupRestore::rebuild_indexes(const TableS& table)
     const NDB_TICKS start = NdbTick_getCurrentTicks();
     restoreLogger.log_info("Rebuilding index `%s` on table `%s` ...",
         idx_name, tab_name);
-    bool done = false;
-    for(int retries = 0; retries < MAX_RETRIES; retries++)
-    {
-      if ((dict->getIndex(idx_name, tab_name) == NULL)
-          && (dict->createIndex(* idx, 1) != 0))
-      {
-        if(dict->getNdbError().status == NdbError::TemporaryError)
-        {
-          restoreLogger.log_error("retry sleep 50 ms on error %u",
-                      dict->getNdbError().code);
-          NdbSleep_MilliSleep(100 + retries * 300);
-          continue;  // retry on temporary error
-        }
-        else
-        {
-          break;
-        }
-      }
-      else
-      {
-        done = true;
-        break;
-      }
-    }
-    if(!done)
-    {
-      restoreLogger.log_info("FAIL!");
-      restoreLogger.log_error("Rebuilding index `%s` on table `%s` failed: %u: %s",
-          idx_name, tab_name, dict->getNdbError().code, dict->getNdbError().message);
+    if (!ndbapi_dict_operation_retry(
+            [idx, idx_name, tab_name](NdbDictionary::Dictionary *dict) {
+              if (!dict->getIndex(idx_name, tab_name)) {
+                return dict->createIndex(*idx, 1);
+              } else
+                return 0;
+            },
+            dict)) {
+      restoreLogger.log_error(
+          "Rebuilding index `%s` on table `%s` failed: %u: %s", idx_name,
+          tab_name, dict->getNdbError().code, dict->getNdbError().message);
       return false;
     }
     const NDB_TICKS stop = NdbTick_getCurrentTicks();
@@ -1432,16 +1394,19 @@ BackupRestore::object(Uint32 type, const void * ptr)
       NdbDictionary::LogfileGroup * lg = m_logfilegroups[old.getDefaultLogfileGroupId()];
       old.setDefaultLogfileGroup(* lg);
       restoreLogger.log_info("Creating tablespace: %s...", old.getName());
-      int ret = dict->createTablespace(old);
-      if (ret)
-      {
-	NdbError errobj= dict->getNdbError();
-	restoreLogger.log_info("FAILED");
+
+      if (!ndbapi_dict_operation_retry(
+              [old](NdbDictionary::Dictionary *dict) {
+                return dict->createTablespace(old);
+              },
+              dict)) {
         restoreLogger.log_error("Create tablespace failed: %s: %u: %s",
-            old.getName(), errobj.code, errobj.message);
-	return false;
+                                old.getName(), dict->getNdbError().code,
+                                dict->getNdbError().message);
+        return false;
       }
-      restoreLogger.log_info("done");
+      restoreLogger.log_info("Successfully created tablespace %s",
+                             old.getName());
     }
     
     NdbDictionary::Tablespace curr = dict->getTablespace(old.getName());
@@ -1473,16 +1438,18 @@ BackupRestore::object(Uint32 type, const void * ptr)
     if (!m_no_restore_disk)
     {
       restoreLogger.log_info("Creating logfile group: %s...", old.getName());
-      int ret = dict->createLogfileGroup(old);
-      if (ret)
-      {
-	NdbError errobj= dict->getNdbError();
-	restoreLogger.log_info("FAILED");
+      if (!ndbapi_dict_operation_retry(
+              [old](NdbDictionary::Dictionary *dict) {
+                return dict->createLogfileGroup(old);
+              },
+              dict)) {
         restoreLogger.log_error("Create logfile group failed: %s: %u: %s",
-            old.getName(), errobj.code, errobj.message);
-	return false;
+                                old.getName(), dict->getNdbError().code,
+                                dict->getNdbError().message);
+        return false;
       }
-      restoreLogger.log_info("done");
+      restoreLogger.log_info("Successfully created logfile group %s",
+                             old.getName());
     }
     
     NdbDictionary::LogfileGroup curr = dict->getLogfileGroup(old.getName());
@@ -1520,15 +1487,18 @@ BackupRestore::object(Uint32 type, const void * ptr)
                               ts->getObjectId());
       old.setTablespace(* ts);
       restoreLogger.log_info("Creating datafile \"%s\"...", old.getPath());
-      if (dict->createDatafile(old))
-      {
-	NdbError errobj= dict->getNdbError();
-	restoreLogger.log_info("FAILED");
+
+      if (!ndbapi_dict_operation_retry(
+              [old](NdbDictionary::Dictionary *dict) {
+                return dict->createDatafile(old);
+              },
+              dict)) {
         restoreLogger.log_error("Create datafile failed: %s: %u: %s",
-            old.getPath(), errobj.code, errobj.message);
-	return false;
+                                old.getPath(), dict->getNdbError().code,
+                                dict->getNdbError().message);
+        return false;
       }
-      restoreLogger.log_info("done");
+      restoreLogger.log_info("Successfully created Datafile %s", old.getPath());
       m_n_datafile++;
     }
     return true;
@@ -1547,15 +1517,19 @@ BackupRestore::object(Uint32 type, const void * ptr)
           lg->getObjectId(), (void*)lg);
       old.setLogfileGroup(* lg);
       restoreLogger.log_info("Creating undofile \"%s\"...", old.getPath());
-      if (dict->createUndofile(old))
-      {
-	NdbError errobj= dict->getNdbError();
-	restoreLogger.log_info("FAILED");
+      if (!ndbapi_dict_operation_retry(
+              [old](NdbDictionary::Dictionary *dict) {
+                return dict->createUndofile(old);
+              },
+              dict)) {
         restoreLogger.log_error("Create undofile failed: %s: %u: %s",
-            old.getPath(), errobj.code, errobj.message);
-	return false;
+                                old.getPath(), dict->getNdbError().code,
+                                dict->getNdbError().message);
+        return false;
       }
-      restoreLogger.log_info("done");
+
+      restoreLogger.log_info("Successfully created Undo file %s",
+                             old.getPath());
       m_n_undofile++;
     }
     return true;
@@ -1569,21 +1543,36 @@ BackupRestore::object(Uint32 type, const void * ptr)
 
     if (m_restore_meta)
     {
-      int ret = dict->createHashMap(old);
-      if (ret == 0)
-      {
-        restoreLogger.log_info("Created hashmap: %s", old.getName());
-      }
-      else
-      {
-        NdbError errobj = dict->getNdbError();
-        // We ignore schema already exists, this is fine
-        if (errobj.code != 721)
-        {
-          restoreLogger.log_error("Could not create hashmap \"%s\": %u: %s",
-              old.getName(), errobj.code, errobj.message);
-          return false;
+      int retries;
+      for (retries = 0; retries < MAX_RETRIES; retries++) {
+        if (dict->createHashMap(old) != 0) {
+          const NdbError &error = dict->getNdbError();
+
+          if (error.code == 721) break;  // Ignore schema already exists.
+
+          if (error.status != NdbError::TemporaryError) {
+            restoreLogger.log_error("Create hashmap failed: %s: %u: %s",
+                                    old.getName(), error.code, error.message);
+            return false;
+          }
+          restoreLogger.log_error(
+              "Temporary: Failed to create hashmap %s: %u: %s", old.getName(),
+              error.code, error.message);
+          int delay = 100 + retries * 300;
+          restoreLogger.log_info("Sleeping %u ms", delay);
+          NdbSleep_MilliSleep(delay);
+          continue;
         }
+        restoreLogger.log_info("Successfully created hashmap %s",
+                               old.getName());
+        break;
+      }
+      if (retries == MAX_RETRIES) {
+        restoreLogger.log_error(
+            "Create hashmap %s failed "
+            ": too many temporary errors: %u",
+            old.getName(), MAX_RETRIES);
+        return false;
       }
     }
 
@@ -1766,6 +1755,99 @@ BackupRestore::update_apply_status(const RestoreMetaData &metaData, bool snapsho
   if (result &&
       retries > 0)
     restoreLogger.log_error("--restore-epoch completed successfully "
+                            "after retries");
+
+  return result;
+}
+
+bool
+BackupRestore::delete_epoch_tuple()
+{
+  /**
+   * Make sure only 1 thread in which m_delete_epoch_tuple flag
+   * is set executes this method.
+   */
+  if (!m_delete_epoch_tuple)
+    return true;
+
+  bool result= false;
+
+  m_ndb->setDatabaseName(NDB_REP_DB);
+  m_ndb->setSchemaName("def");
+
+  NdbDictionary::Dictionary *dict= m_ndb->getDictionary();
+  const NdbDictionary::Table *ndbtab= dict->getTable(NDB_APPLY_TABLE);
+  if (!ndbtab)
+  {
+    restoreLogger.log_error("%s: %u: %s", NDB_APPLY_TABLE, dict->getNdbError().code, dict->getNdbError().message);
+    return false;
+  }
+  restoreLogger.log_info("[with_apply_status] Deleting tuple with server_id=0 from ndb_apply_status");
+
+  int retries;
+  for (retries = 0; retries < MAX_RETRIES; retries++)
+  {
+    if (retries > 0)
+      NdbSleep_MilliSleep(100 + retries * 300);
+
+    NdbTransaction * trans= m_ndb->startTransaction();
+    if (!trans)
+    {
+      restoreLogger.log_error("%s : failed to get transaction in --with-apply-status: %u:%s",
+          NDB_APPLY_TABLE, m_ndb->getNdbError().code, m_ndb->getNdbError().message);
+      if (m_ndb->getNdbError().status == NdbError::TemporaryError)
+      {
+        continue;
+      }
+    }
+
+    TransGuard g(trans);
+    NdbOperation * op= trans->getNdbOperation(ndbtab);
+    if (!op)
+    {
+      restoreLogger.log_error("%s : failed to get operation in --with-apply-status: %u:%s",
+          NDB_APPLY_TABLE, trans->getNdbError().code, trans->getNdbError().message);
+      if (trans->getNdbError().status == NdbError::TemporaryError)
+      {
+        continue;
+      }
+      return false;
+    }
+
+    Uint32 server_id= 0;
+    if (op->deleteTuple() ||
+        op->equal(0u, (const char *)&server_id, sizeof(server_id)))
+    {
+      restoreLogger.log_error("%s : failed to delete tuple with server_id=0 in --with-apply-status: %u: %s",
+          NDB_APPLY_TABLE, op->getNdbError().code, op->getNdbError().message);
+      return false;
+    }
+
+    int res = trans->execute(NdbTransaction::Commit);
+    if (res != 0)
+    {
+      if(trans->getNdbError().code == 626)
+      {
+        result= true;
+        break;
+      }
+      restoreLogger.log_error("%s : failed to commit transaction in --with-apply-status: %u:%s",
+          NDB_APPLY_TABLE, trans->getNdbError().code, trans->getNdbError().message);
+      if (trans->getNdbError().status == NdbError::TemporaryError)
+      {
+        continue;
+      }
+      return false;
+    }
+    else
+    {
+      result= true;
+      break;
+    }
+  }
+  if (result &&
+      retries > 0)
+    restoreLogger.log_error("--with-apply-status completed successfully "
                             "after retries");
 
   return result;
@@ -2181,7 +2263,7 @@ BackupRestore::table_compatible_check(TableS & tableS)
   /**
    * Check if target table is restored with --disable-indexes in previous steps.
    * If it already has indexes, it indicates that --disable-indexes isn't used.
-   * In that case, dispaly a warning that it could lead to duplicate key errors
+   * In that case, display a warning that it could lead to duplicate key errors
    * if the indexes already restored are unique indexes.
    */
   {
@@ -2961,7 +3043,7 @@ BackupRestore::table(const TableS & table){
      * Since default from mysqld is to add force of varpart (disable with
      * ROW_FORMAT=FIXED) we force varpart onto tables when they are restored
      * from backups taken with older versions. This will be wrong if
-     * ROW_FORMAT=FIXED was used on original table, however the likelyhood of
+     * ROW_FORMAT=FIXED was used on original table, however the likelihood of
      * this is low, since ROW_FORMAT= was a NOOP in older versions.
      */
 
@@ -2998,20 +3080,43 @@ BackupRestore::table(const TableS & table){
       }
     }
 
-    if (dict->createTable(copy) == -1) 
-    {
-      restoreLogger.log_error("Create table `%s` failed: %u: %s",
-          table.getTableName(), dict->getNdbError().code, dict->getNdbError().message);
-      if (dict->getNdbError().code == 771)
-      {
-        /*
-          The user on the cluster where the backup was created had specified
-          specific node groups for partitions. Some of these node groups
-          didn't exist on this cluster.
-        */
-        restoreLogger.log_error("The node groups defined in the table didn't exist in this"
-            " cluster.");
+    int retries;
+    for (retries = 0; retries < MAX_RETRIES; retries++) {
+      if (dict->createTable(copy) == -1) {
+        const NdbError &error = dict->getNdbError();
+        if (error.status != NdbError::TemporaryError) {
+          restoreLogger.log_error("Create table `%s` failed: %u: %s",
+                                  table.getTableName(), error.code,
+                                  error.message);
+          if (dict->getNdbError().code == 771) {
+            /*
+              The user on the cluster where the backup was created had specified
+              specific node groups for partitions. Some of these node groups
+              didn't exist on this cluster.
+            */
+            restoreLogger.log_error(
+                "The node groups defined in the table didn't exist in this"
+                " cluster.");
+          }
+          return false;
+        }
+        restoreLogger.log_error("Temporary: Failed to create table %s: %u: %s",
+                                table.getTableName(), error.code,
+                                error.message);
+        int delay = 100 + retries * 300;
+        restoreLogger.log_info("Sleeping %u ms", delay);
+        NdbSleep_MilliSleep(delay);
+        continue;
       }
+      restoreLogger.log_info("Successfully created table %s",
+                             table.getTableName());
+      break;
+    }
+    if (retries == MAX_RETRIES) {
+      restoreLogger.log_error(
+          "Create table %s failed "
+          ": too many temporary errors: %u",
+          table.getTableName(), MAX_RETRIES);
       return false;
     }
     info.setLevel(254);
@@ -3166,13 +3271,17 @@ BackupRestore::fk(Uint32 type, const void * ptr)
         if (dict->getForeignKey(fk, fullname) == 0)
         {
           restoreLogger.log_info("Dropping Foreign key %s", fkname);
-          if (dict->dropForeignKey(fk) != 0)
-          {
-            restoreLogger.log_error("Failed to drop fk '%s' : %u %s",
-                                    fk_ptr->getName(), dict->getNdbError().code,
-                                    dict->getNdbError().message);
+          if (!ndbapi_dict_operation_retry(
+                  [fk](NdbDictionary::Dictionary *dict) {
+                    return dict->dropForeignKey(fk);
+                  },
+                  dict)) {
+            restoreLogger.log_error(
+                "Error: Failed to drop foreign key %s: %u: %s", fkname,
+                dict->getNdbError().code, dict->getNdbError().message);
             return false;
           }
+          restoreLogger.log_info("Successfully dropped foreign key %s", fkname);
         }
       }
     }
@@ -3237,32 +3346,16 @@ BackupRestore::endOfTables(){
     idx->setName(split_idx[3].c_str());
     if (m_restore_meta && !m_disable_indexes && !m_rebuild_indexes)
     {
-      bool done = false;
-      for(unsigned int retries = 0; retries < MAX_RETRIES; retries++)
-      {
-        if(dict->createIndex(* idx) == 0)
-        {
-          done = true;  // success
-          break;
-        }
-        else if(dict->getNdbError().status == NdbError::TemporaryError)
-        {
-          int delay = 100 + retries * 300;
-          restoreLogger.log_error("retry sleep %u ms on error %u",
-                      delay, dict->getNdbError().code);
-          NdbSleep_MilliSleep(delay);
-          continue;  // retry on temporary error
-        }
-        else
-        {
-          break; // error out on permanent error
-        }
-      }
-      if(!done)
-      {
-        delete idx;
+      if (!ndbapi_dict_operation_retry(
+              [idx](NdbDictionary::Dictionary *dict) {
+                return dict->createIndex(*idx);
+              },
+              dict)) {
         restoreLogger.log_error("Failed to create index `%s` on `%s`: %u: %s",
-            split_idx[3].c_str(), table_name.c_str(), dict->getNdbError().code, dict->getNdbError().message);
+                                split_idx[3].c_str(), table_name.c_str(),
+                                dict->getNdbError().code,
+                                dict->getNdbError().message);
+        delete idx;
         return false;
       }
       restoreLogger.log_info("Successfully created index `%s` on `%s`",
@@ -3273,19 +3366,20 @@ BackupRestore::endOfTables(){
       // Drop indexes if they exist
       if(dict->getIndex(idx->getName(), prim->getName()))
       {
-        if (dict->dropIndex(idx->getName(), prim->getName()) == 0)
-        {
-          restoreLogger.log_info("Dropped index `%s` on `%s`",
-            split_idx[3].c_str(), table_name.c_str());
-        }
-        else
-        {
+        restoreLogger.log_info("Dropping Index %s", split_idx[3].c_str());
+        if (!ndbapi_dict_operation_retry(
+                [idx, prim](NdbDictionary::Dictionary *dict) {
+                  return dict->dropIndex(idx->getName(), prim->getName());
+                },
+                dict)) {
           restoreLogger.log_info("Failed to drop index `%s` on `%s`: %u %s",
                                  split_idx[3].c_str(), table_name.c_str(),
                                  dict->getNdbError().code,
                                  dict->getNdbError().message);
           return false;
         }
+        restoreLogger.log_info("Dropped index `%s` on `%s`",
+                               split_idx[3].c_str(), table_name.c_str());
       }
     }
     Uint32 id = prim->getObjectId();
@@ -3450,19 +3544,52 @@ BackupRestore::endOfTablesFK()
     fk.setOnUpdateAction(fkinfo.getOnUpdateAction());
     fk.setOnDeleteAction(fkinfo.getOnDeleteAction());
 
-    // create
-    if (dict->createForeignKey(fk) != 0)
-    {
-      restoreLogger.log_error("Failed to create foreign key %s"
+    restoreLogger.log_info("Creating foreign key: %s", fkname);
+    if (!ndbapi_dict_operation_retry(
+            [fk](NdbDictionary::Dictionary *dict) {
+              return dict->createForeignKey(fk);
+            },
+            dict)) {
+      restoreLogger.log_error(
+          "Failed to create foreign key %s"
           " parent %s child %s : %u: %s",
-          fkname, pInfo, cInfo, dict->getNdbError().code, dict->getNdbError().message);
+          fkname, pInfo, cInfo, dict->getNdbError().code,
+          dict->getNdbError().message);
       return false;
     }
-    restoreLogger.log_info("Successfully created foreign key %s"
-          " parent %s child %s",
-          fkname, pInfo, cInfo);
+    restoreLogger.log_info(
+        "Successfully created foreign key %s parent %s child %s", fkname, pInfo,
+        cInfo);
   }
   restoreLogger.log_info("Create foreign keys done");
+  return true;
+}
+
+bool BackupRestore::ndbapi_dict_operation_retry(
+    const std::function<int(NdbDictionary::Dictionary *)> &func,
+    NdbDictionary::Dictionary *dict) {
+  int retries;
+  for (retries = 0; retries < MAX_RETRIES; retries++) {
+    if (func(dict) != 0) {
+      if (dict->getNdbError().status != NdbError::TemporaryError) {
+        return false;
+      }
+      restoreLogger.log_error("Failed with temporary error: %d %s",
+                              dict->getNdbError().code,
+                              dict->getNdbError().message);
+      int delay = 100 + retries * 300;
+      restoreLogger.log_info("Sleeping %u ms and retrying...", delay);
+      NdbSleep_MilliSleep(delay);
+      continue;
+    }
+    break;
+  }
+
+  if (retries == MAX_RETRIES) {
+    restoreLogger.log_error("Failed with too many temporary errors: %u",
+                            MAX_RETRIES);
+    return false;
+  }
   return true;
 }
 

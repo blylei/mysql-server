@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,6 +29,7 @@
 #define ACC_SAFE_QUEUE
 #endif
 
+#include "util/require.h"
 #include <pc.hpp>
 #include "Bitmask.hpp"
 #include <DynArr256.hpp>
@@ -120,7 +121,7 @@
 #define ZDIR_RANGE_FULL_ERROR 633 // on fragment
 
 #define ZLOCAL_KEY_LENGTH_ERROR 634 // From Dbdict via Dblqh
-#define ZNOWAIT_ERROR 635 // Cant lock immediately, and nowait set
+#define ZNOWAIT_ERROR 635 // Can't lock immediately, and nowait set
 
 #endif
 
@@ -179,7 +180,7 @@ Uint16
 ElementHeader::getPageIdx(Uint32 data)
 {
   /* Bits 1-13 is reserved for page index */
-  NDB_STATIC_ASSERT(MAX_TUPLES_BITS <= 13);
+  static_assert(MAX_TUPLES_BITS <= 13);
   return (data >> 1) & MAX_TUPLES_PER_PAGE;
 }
 
@@ -420,9 +421,9 @@ struct Fragmentrec {
   Uint32 expSenderPageptr;
 
 //-----------------------------------------------------------------------------
-// List of lock owners currently used only for self-check
+// Number of locks held on fragment, only for self-check
 //-----------------------------------------------------------------------------
-  Uint32 lockOwnersList;
+  Uint32 lockCount;
 
 //-----------------------------------------------------------------------------
 // References to Directory Ranges (which in turn references directories, which
@@ -695,7 +696,7 @@ struct Operationrec {
     ,OP_ACC_LOCK_MODE       = 0x00020 // Or:de lock mode of all operation
                                       // before me
     ,OP_LOCK_OWNER          = 0x00040
-    ,OP_RUN_QUEUE           = 0x00080 // In parallell queue of lock owner
+    ,OP_RUN_QUEUE           = 0x00080 // In parallel queue of lock owner
     ,OP_DIRTY_READ          = 0x00100
     ,OP_LOCK_REQ            = 0x00200 // isAccLockReq
     ,OP_COMMIT_DELETE_CHECK = 0x00400
@@ -741,14 +742,12 @@ struct Operationrec {
   Uint32 fid;
   Uint32 fragptr;
   LHBits32 hashValue;
-  Uint32 nextLockOwnerOp;
   Uint32 nextParallelQue;
   union {
     Uint32 nextSerialQue;      
     Uint32 m_lock_owner_ptr_i; // if nextParallelQue = RNIL, else undefined
   };
   Uint32 prevOp;
-  Uint32 prevLockOwnerOp;
   union {
     Uint32 prevParallelQue;
     Uint32 m_lo_last_parallel_op_ptr_i;
@@ -939,7 +938,6 @@ private:
   void initFragAdd(Signal*, FragmentrecPtr) const;
   void initFragPageZero(FragmentrecPtr, Page8Ptr) const;
   void initFragGeneral(FragmentrecPtr) const;
-  void verifyFragCorrect(FragmentrecPtr regFragPtr) const;
   void releaseFragResources(Signal* signal, Uint32 fragIndex);
   void releaseRootFragRecord(Signal* signal, RootfragmentrecPtr rootPtr) const;
   void releaseRootFragResources(Signal* signal, Uint32 tableId);
@@ -969,7 +967,8 @@ private:
 #endif
 #ifdef ACC_SAFE_QUEUE
   bool validate_lock_queue(OperationrecPtr opPtr) const;
-  Uint32 get_parallel_head(OperationrecPtr opPtr) const;
+  bool validate_parallel_queue(OperationrecPtr opPtr,
+                               Uint32 ownerPtrI) const;
   void dump_lock_queue(OperationrecPtr loPtr) const;
 #else
   bool validate_lock_queue(OperationrecPtr) const { return true;}
@@ -1110,8 +1109,6 @@ private:
 			  OperationrecPtr release_op) const;
   Uint32 allocOverflowPage();
   bool getfragmentrec(FragmentrecPtr&, Uint32 fragId);
-  void insertLockOwnersList(const OperationrecPtr&) const;
-  void takeOutLockOwnersList(const OperationrecPtr&) const;
 
   void initFsOpRec(Signal* signal) const;
   void initOverpage(Page8Ptr);
@@ -1547,7 +1544,7 @@ inline bool Dbacc::ScanRec::isScanned(Uint32 elemptr) const
    * number of available bits in elemScanned to get an unique bit index for
    * each element.
    */
-  NDB_STATIC_ASSERT(ZBUF_SIZE <= ELEM_SCANNED_BITS);
+  static_assert(ZBUF_SIZE <= ELEM_SCANNED_BITS);
   return (elemScanned >> (elemptr % ELEM_SCANNED_BITS)) & 1;
 }
 

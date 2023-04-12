@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -53,7 +53,7 @@ namespace binary_log {
   @class Rotate_event
 
   When a binary log file exceeds a size limit, a ROTATE_EVENT is written
-  at the end of the file that points to the next file in the squence.
+  at the end of the file that points to the next file in the sequence.
   This event is information for the slave to know the name of the next
   binary log it is going to receive.
 
@@ -266,7 +266,7 @@ class Format_description_event : public Binary_log_event {
   uint8_t common_header_len;
   /*
     The list of post-headers' lengths followed
-    by the checksum alg decription byte
+    by the checksum alg description byte
   */
   std::vector<uint8_t> post_header_len;
   unsigned char server_version_split[ST_SERVER_VER_SPLIT_LEN];
@@ -394,7 +394,7 @@ class Stop_event : public Binary_log_event {
 /**
   @class Incident_event
 
-   Class representing an incident, an occurance out of the ordinary,
+   Class representing an incident, an occurrence out of the ordinary,
    that happened on the master.
 
    The event is used to inform the slave that something out of the
@@ -539,7 +539,7 @@ class Xid_event : public Binary_log_event {
   @class XA_prepare_event
 
   An XA_prepare event is generated for a XA prepared transaction.
-  Like Xid_event it contans XID of the *prepared* transaction.
+  Like Xid_event it contains XID of the *prepared* transaction.
 
   @section XA_prepare_event_binary_format Binary Format
 
@@ -583,6 +583,7 @@ class XA_prepare_event : public Binary_log_event {
   */
   static const int MY_XIDDATASIZE = 128;
 
+ public:
   struct MY_XID {
     long formatID;
     long gtrid_length;
@@ -624,6 +625,19 @@ class XA_prepare_event : public Binary_log_event {
   void print_event_info(std::ostream &) override {}
   void print_long_info(std::ostream &) override {}
 #endif
+  /**
+    Whether or not this `XA_prepare_event` represents an `XA COMMIT ONE
+    PHASE`.
+
+    @return true if it's an `XA COMMIT ONE PHASE`, false otherwise.
+   */
+  bool is_one_phase() const;
+  /**
+    Retrieves the content of `my_xid` member variable.
+
+    @return The const-reference to the `my_xid` member variable.
+   */
+  MY_XID const &get_xid() const;
 };
 
 /**
@@ -1028,6 +1042,18 @@ class Gtid_event : public Binary_log_event {
   void print_event_info(std::ostream &) override {}
   void print_long_info(std::ostream &) override {}
 #endif
+  /*
+    Commit group ticket consists of: 1st bit, used internally for
+    synchronization purposes ("is in use"),  followed by 63 bits for
+    the ticket value.
+  */
+  static constexpr int COMMIT_GROUP_TICKET_LENGTH = 8;
+  /*
+    Default value of commit_group_ticket, which means it is not
+    being used.
+  */
+  static constexpr std::uint64_t kGroupTicketUnset = 0;
+
  protected:
   static const int ENCODED_FLAG_LENGTH = 1;
   static const int ENCODED_SID_LENGTH = 16;  // Uuid::BYTE_LENGTH;
@@ -1101,9 +1127,10 @@ class Gtid_event : public Binary_log_event {
     On the originating master, the event has only one timestamp as the two
     timestamps are equal. On every other server we have two timestamps.
   */
-  static const int MAX_DATA_LENGTH = FULL_COMMIT_TIMESTAMP_LENGTH +
-                                     TRANSACTION_LENGTH_MAX_LENGTH +
-                                     FULL_SERVER_VERSION_LENGTH;
+  static const int MAX_DATA_LENGTH =
+      FULL_COMMIT_TIMESTAMP_LENGTH + TRANSACTION_LENGTH_MAX_LENGTH +
+      FULL_SERVER_VERSION_LENGTH +
+      COMMIT_GROUP_TICKET_LENGTH; /* 64-bit unsigned integer */
 
   static const int MAX_EVENT_LENGTH =
       LOG_EVENT_HEADER_LEN + POST_HEADER_LENGTH + MAX_DATA_LENGTH;
@@ -1123,6 +1150,28 @@ class Gtid_event : public Binary_log_event {
   uint32_t original_server_version;
   /** The version of the immediate server */
   uint32_t immediate_server_version;
+
+  /** Ticket number used to group sessions together during the BGC. */
+  std::uint64_t commit_group_ticket{kGroupTicketUnset};
+
+  /**
+    Returns the length of the packed `commit_group_ticket` field. It may be
+    8 bytes or 0 bytes, depending on whether or not the value is
+    instantiated.
+
+    @return The length of the packed `commit_group_ticket` field
+  */
+  int get_commit_group_ticket_length() const;
+
+  /**
+   Set the commit_group_ticket and update the transaction length if
+   needed, that is, if the commit_group_ticket was not set already
+   account it on the transaction size.
+
+   @param value The commit_group_ticket value.
+  */
+  void set_commit_group_ticket_and_update_transaction_length(
+      std::uint64_t value);
 };
 
 /**
@@ -1332,7 +1381,7 @@ class Transaction_context_event : public Binary_log_event {
   <tr>
     <td>seq_number</td>
     <td>8 bytes integer</td>
-    <td>Variable to identify the next sequence number to be alloted to the
+    <td>Variable to identify the next sequence number to be allotted to the
   certified transaction.</td>
   </tr>
 
@@ -1348,7 +1397,7 @@ class Transaction_context_event : public Binary_log_event {
 class View_change_event : public Binary_log_event {
  public:
   /**
-    Decodes the view_change_log_event generated incase a server enters or
+    Decodes the view_change_log_event generated in case a server enters or
     leaves the group.
 
     <pre>

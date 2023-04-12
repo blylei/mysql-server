@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2013, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2013, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -214,7 +214,7 @@ int table_replication_applier_status::make_row(Master_info *mi) {
 
   m_row.remaining_delay = 0;
   if (slave_sql_running_state == stage_sql_thd_waiting_until_delay.m_name) {
-    time_t t = my_time(0), sql_delay_end = mi->rli->get_sql_delay_end();
+    time_t t = time(nullptr), sql_delay_end = mi->rli->get_sql_delay_end();
     m_row.remaining_delay = (uint)(t < sql_delay_end ? sql_delay_end - t : 0);
     m_row.remaining_delay_is_set = true;
   } else {
@@ -242,7 +242,8 @@ int table_replication_applier_status::read_row_values(TABLE *table,
     if (read_all || bitmap_is_set(table->read_set, f->field_index())) {
       switch (f->field_index()) {
         case 0: /**channel_name*/
-          set_field_char_utf8(f, m_row.channel_name, m_row.channel_name_length);
+          set_field_char_utf8mb4(f, m_row.channel_name,
+                                 m_row.channel_name_length);
           break;
         case 1: /* service_state */
           set_field_enum(f, m_row.service_state);

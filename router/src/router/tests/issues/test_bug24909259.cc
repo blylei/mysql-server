@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -23,8 +23,8 @@
 */
 
 /**
- * BUG24909259 ROUTER IS NOT ABLE TO CONNECT TO M/C AFTER BOOSTRAPPED WITH DIR &
- * NAME OPTIONS
+ * BUG24909259 ROUTER IS NOT ABLE TO CONNECT TO M/C AFTER BOOTSTRAPPED WITH DIR
+ * AND NAME OPTIONS
  *
  */
 
@@ -36,11 +36,11 @@
 
 #include <gtest/gtest.h>
 
-#include "default_paths.h"
 #include "dim.h"
 #include "keyring/keyring_manager.h"
 #include "keyring/keyring_memory.h"
 #include "mysql/harness/config_parser.h"
+#include "mysqlrouter/default_paths.h"
 #include "mysqlrouter/utils.h"
 #include "random_generator.h"
 #include "router_app.h"

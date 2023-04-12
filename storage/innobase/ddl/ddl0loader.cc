@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2020, 2021, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -46,7 +46,7 @@ class Loader::Task_queue {
  public:
   /** Constructor.
   @param[in] ctx                DDL context.
-  @param[in] sync               True for syncronous execution. */
+  @param[in] sync               True for synchronous execution. */
   explicit Task_queue(const Context &ctx, bool sync) noexcept;
 
   /** Destructor. */
@@ -80,7 +80,7 @@ class Loader::Task_queue {
     }
   }
 
-  /** Note that we failed to create the configued number of threads. */
+  /** Note that we failed to create the configured number of threads. */
   void thread_create_failed() noexcept {
     ut_a(!m_sync);
     mutex_enter(&m_mutex);
@@ -190,7 +190,7 @@ class Loader::Task_queue {
     return err;
   }
 
-  /** Execute function when there is a singe thread. */
+  /** Execute function when there is a single thread. */
   dberr_t st_execute() {
     ut_a(m_sync);
 
@@ -310,19 +310,19 @@ dberr_t Loader::load() noexcept {
 
   if (!sync) {
     auto fn = [=](PSI_thread_seqnum seqnum) -> dberr_t {
+#ifdef UNIV_PFS_THREAD
       Runnable runnable{ddl_thread_key, seqnum};
+#else
+      Runnable runnable{PSI_NOT_INSTRUMENTED, seqnum};
+#endif /* UNIV_PFS_THREAD */
 
-      auto old_thd = current_thd;
-
-      current_thd = m_ctx.thd();
+      current_thd = nullptr;
 
       const auto err = runnable(&Task_queue::execute, m_taskq);
 
       if (err != DB_SUCCESS) {
         m_taskq->signal();
       }
-
-      current_thd = old_thd;
 
       return err;
     };

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -212,7 +212,7 @@ bool Sql_cmd_load_table::execute_inner(THD *thd,
   THD::killed_state killed_status = THD::NOT_KILLED;
   bool is_concurrent;
   bool transactional_table;
-  TABLE_LIST *const table_list = thd->lex->query_tables;
+  Table_ref *const table_list = thd->lex->query_tables;
   const char *db = table_list->db;  // This is never null
   /*
     If path for file is not defined, we will use the current database.
@@ -255,7 +255,7 @@ bool Sql_cmd_load_table::execute_inner(THD *thd,
   if (table_list->is_view() && select->resolve_placeholder_tables(thd, false))
     return true; /* purecov: inspected */
 
-  TABLE_LIST *const insert_table_ref =
+  Table_ref *const insert_table_ref =
       table_list->is_updatable() &&  // View must be updatable
               !table_list
                    ->is_multiple_tables() &&  // Multi-table view not allowed
@@ -325,7 +325,7 @@ bool Sql_cmd_load_table::execute_inner(THD *thd,
     }
     bitmap_set_all(table->write_set);
     /*
-      Let us also prepare SET clause, altough it is probably empty
+      Let us also prepare SET clause, although it is probably empty
       in this case.
     */
     if (setup_fields(thd, /*want_privilege=*/INSERT_ACL,
@@ -753,7 +753,7 @@ inline bool is_hidden_generated_column(TABLE *table, Item *item) {
 
   @param thd         Pointer to THD object
   @param info        Pointer to COPY_INFO object
-  @param table_list  Pointer to TABLE_LIST object
+  @param table_list  Pointer to Table_ref object
   @param read_info   Pointer to READ_INFO object
   @param skip_lines  Number of ignored lines
                      at the start of the file.
@@ -761,7 +761,7 @@ inline bool is_hidden_generated_column(TABLE *table, Item *item) {
   @returns true if error
 */
 bool Sql_cmd_load_table::read_fixed_length(THD *thd, COPY_INFO &info,
-                                           TABLE_LIST *table_list,
+                                           Table_ref *table_list,
                                            READ_INFO &read_info,
                                            ulong skip_lines) {
   TABLE *table = table_list->table;
@@ -915,7 +915,7 @@ class Field_tmp_nullability_guard {
 
   @param thd         Pointer to THD object
   @param info        Pointer to COPY_INFO object
-  @param table_list  Pointer to TABLE_LIST object
+  @param table_list  Pointer to Table_ref object
   @param read_info   Pointer to READ_INFO object
   @param enclosed    ENCLOSED BY character
   @param skip_lines  Number of ignored lines
@@ -924,7 +924,7 @@ class Field_tmp_nullability_guard {
   @returns true if error
 */
 bool Sql_cmd_load_table::read_sep_field(THD *thd, COPY_INFO &info,
-                                        TABLE_LIST *table_list,
+                                        Table_ref *table_list,
                                         READ_INFO &read_info,
                                         const String &enclosed,
                                         ulong skip_lines) {
@@ -1133,7 +1133,7 @@ bool Sql_cmd_load_table::read_sep_field(THD *thd, COPY_INFO &info,
 
   @param thd         Pointer to THD object
   @param info        Pointer to COPY_INFO object
-  @param table_list  Pointer to TABLE_LIST object
+  @param table_list  Pointer to Table_ref object
   @param read_info   Pointer to READ_INFO object
   @param skip_lines  Number of ignored lines
                      at the start of the file.
@@ -1141,7 +1141,7 @@ bool Sql_cmd_load_table::read_sep_field(THD *thd, COPY_INFO &info,
   @returns true if error
 */
 bool Sql_cmd_load_table::read_xml_field(THD *thd, COPY_INFO &info,
-                                        TABLE_LIST *table_list,
+                                        Table_ref *table_list,
                                         READ_INFO &read_info,
                                         ulong skip_lines) {
   TABLE *table = table_list->table;
@@ -1325,7 +1325,7 @@ char READ_INFO::unescape(char chr) {
 
 /*
   Read a line using buffering
-  If last line is empty (in line mode) then it isn't outputed
+  If last line is empty (in line mode) then it isn't outputted
 */
 
 READ_INFO::READ_INFO(File file_par, size_t tot_length, const CHARSET_INFO *cs,
@@ -1545,7 +1545,7 @@ bool READ_INFO::read_field() {
         }
       }
       if (chr == found_enclosed_char) {
-        if ((chr = GET) == found_enclosed_char) {  // Remove dupplicated
+        if ((chr = GET) == found_enclosed_char) {  // Remove duplicated
           *to++ = (uchar)chr;
           continue;
         }
@@ -2140,6 +2140,9 @@ bool Sql_cmd_load_table::execute(THD *thd) {
     thd->push_internal_handler(&ignore_handler);
   else if (thd->is_strict_mode())
     thd->push_internal_handler(&strict_handler);
+
+  lex->using_hypergraph_optimizer =
+      thd->optimizer_switch_flag(OPTIMIZER_SWITCH_HYPERGRAPH_OPTIMIZER);
 
   bool res = execute_inner(thd, lex->duplicates);
 

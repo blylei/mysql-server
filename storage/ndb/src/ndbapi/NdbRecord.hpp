@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2007, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2007, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -149,7 +149,7 @@ public:
     bool get_var_length(const char *row, Uint32& len) const
     {
       if (flags & IsVar1ByteLen)
-        len= 1 + *((Uint8*)(row+offset));
+        len = 1 + *((const Uint8 *)(row + offset));
       else if (flags & IsVar2ByteLen)
         len= 2 + uint2korr(row+offset);
       else
@@ -236,7 +236,7 @@ public:
   const Uint32 *distkey_indexes;
 
   /*
-    m_min_distkey_prefix_length is the minimum lenght of an index prefix
+    m_min_distkey_prefix_length is the minimum length of an index prefix
     needed to include all distribution keys. In other words, it is one more
     that the index of the last distribution key in the index order.
 

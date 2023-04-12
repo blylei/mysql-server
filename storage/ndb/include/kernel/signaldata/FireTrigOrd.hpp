@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -260,7 +260,7 @@ struct FireTrigConf
 
   Uint32 tcOpRec;
   Uint32 transId[2];
-  Uint32 numFiredTriggers; // bit 31 defered trigger
+  Uint32 numFiredTriggers; // bit 31 deferred trigger
 
   static Uint32 getFiredCount(Uint32 v) {
     return NoOfFiredTriggers::getFiredCount(v);

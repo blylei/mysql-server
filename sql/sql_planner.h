@@ -1,7 +1,7 @@
 #ifndef SQL_PLANNER_INCLUDED
 #define SQL_PLANNER_INCLUDED
 
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -41,7 +41,7 @@ class Key_use;
 class Opt_trace_object;
 class THD;
 struct TABLE;
-struct TABLE_LIST;
+class Table_ref;
 struct POSITION;
 
 typedef ulonglong nested_join_map;
@@ -73,7 +73,7 @@ inline table_map get_lateral_deps(const JOIN_TAB &tab) {
 
 class Optimize_table_order {
  public:
-  Optimize_table_order(THD *thd_arg, JOIN *join_arg, TABLE_LIST *sjm_nest_arg);
+  Optimize_table_order(THD *thd_arg, JOIN *join_arg, Table_ref *sjm_nest_arg);
   ~Optimize_table_order() = default;
   /**
     Entry point to table join order optimization.
@@ -102,7 +102,7 @@ class Optimize_table_order {
     If non-NULL, we are optimizing a materialized semi-join nest.
     If NULL, we are optimizing a complete join plan.
   */
-  const TABLE_LIST *const emb_sjm_nest;
+  const Table_ref *const emb_sjm_nest;
   /**
     When calculating a plan for a materialized semi-join nest,
     best_access_path() needs to know not only the remaining tables within the
@@ -177,9 +177,9 @@ class Optimize_table_order {
                                                   double *newcost);
   void semijoin_mat_scan_access_paths(uint last_inner_tab, uint last_outer_tab,
                                       table_map remaining_tables,
-                                      TABLE_LIST *sjm_nest, double *newcount,
+                                      Table_ref *sjm_nest, double *newcount,
                                       double *newcost);
-  void semijoin_mat_lookup_access_paths(uint last_inner, TABLE_LIST *sjm_nest,
+  void semijoin_mat_lookup_access_paths(uint last_inner, Table_ref *sjm_nest,
                                         double *newcount, double *newcost);
   void semijoin_dupsweedout_access_paths(uint first_tab, uint last_tab,
                                          double *newcount, double *newcost);
@@ -236,7 +236,7 @@ void get_partial_join_cost(JOIN *join, uint n_tables, double *cost_arg,
   @param is_join_buffering  Whether or not condition filtering is about
                       to be calculated for an access method using join
                       buffering.
-  @param write_to_trace Wheter we should print the filtering effect calculated
+  @param write_to_trace Whether we should print the filtering effect calculated
                       by histogram statistics and the final aggregated filtering
                       effect to optimizer trace.
   @param parent_trace The parent trace object where the final aggregated

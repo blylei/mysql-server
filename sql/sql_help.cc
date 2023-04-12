@@ -1,4 +1,4 @@
-/* Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2002, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -115,10 +115,10 @@ enum enum_used_fields {
 
   RETURN VALUES
     0           all ok
-    1           one of the fileds was not found
+    1           one of the fields was not found
 */
 
-static bool init_fields(THD *thd, TABLE_LIST *tables,
+static bool init_fields(THD *thd, Table_ref *tables,
                         struct st_find_field *find_fields, uint count) {
   Name_resolution_context *context = &thd->lex->query_block->context;
   DBUG_TRACE;
@@ -151,7 +151,7 @@ static bool init_fields(THD *thd, TABLE_LIST *tables,
     memorize_variant_topic()
 
     thd           Thread handler
-    count         number of alredy found topics
+    count         number of already found topics
     find_fields   Filled array of information for work with fields
 
   RETURN VALUES
@@ -585,7 +585,7 @@ static unique_ptr_destroy_only<RowIterator> prepare_select_for_name(
 
   RETURN VALUES
     false Success
-    true  Error and send_error already commited
+    true  Error and send_error already committed
 */
 
 bool mysqld_help(THD *thd, const char *mask) {
@@ -600,14 +600,14 @@ bool mysqld_help(THD *thd, const char *mask) {
   Query_block *const query_block = thd->lex->query_block;
   DBUG_TRACE;
 
-  TABLE_LIST *tables[4];
-  tables[0] = new (thd->mem_root) TABLE_LIST("mysql", "help_topic", TL_READ);
+  Table_ref *tables[4];
+  tables[0] = new (thd->mem_root) Table_ref("mysql", "help_topic", TL_READ);
   if (tables[0] == nullptr) return true;
-  tables[1] = new (thd->mem_root) TABLE_LIST("mysql", "help_category", TL_READ);
+  tables[1] = new (thd->mem_root) Table_ref("mysql", "help_category", TL_READ);
   if (tables[1] == nullptr) return true;
-  tables[2] = new (thd->mem_root) TABLE_LIST("mysql", "help_relation", TL_READ);
+  tables[2] = new (thd->mem_root) Table_ref("mysql", "help_relation", TL_READ);
   if (tables[2] == nullptr) return true;
-  tables[3] = new (thd->mem_root) TABLE_LIST("mysql", "help_keyword", TL_READ);
+  tables[3] = new (thd->mem_root) Table_ref("mysql", "help_keyword", TL_READ);
   if (tables[3] == nullptr) return true;
 
   tables[0]->next_global = tables[0]->next_local =

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -104,10 +104,14 @@ MySQLXProtocol::decode_single_message(const std::vector<uint8_t> &payload) {
 
   auto buf = net::buffer(payload) + 1;
 
-  return {
-      std::in_place, msg_id,
-      protocol_decoder_.decode_message(
-          header_msg_id, static_cast<const uint8_t *>(buf.data()), buf.size())};
+  try {
+    return {std::in_place, msg_id,
+            protocol_decoder_.decode_message(
+                header_msg_id, static_cast<const uint8_t *>(buf.data()),
+                buf.size())};
+  } catch (...) {
+    return stdx::make_unexpected(make_error_code(std::errc::bad_message));
+  }
 }
 
 void MySQLXProtocol::encode_message(
@@ -343,10 +347,12 @@ void MySQLServerMockSessionX::handshake() {
           dynamic_cast<Mysqlx::Connection::CapabilitiesSet *>(msg.get());
       harness_assert(capab_msg != nullptr);
       bool tls_request = false;
+      bool compression_request = false;
       const auto capabilities = capab_msg->capabilities();
       for (int i = 0; i < capabilities.capabilities_size(); ++i) {
         const auto capability = capabilities.capabilities(i);
         if (capability.name() == "tls") tls_request = true;
+        if (capability.name() == "compression") compression_request = true;
       }
 
       if (tls_request) {
@@ -392,6 +398,15 @@ void MySQLServerMockSessionX::handshake() {
 
           return;
         }
+      } else if (compression_request) {
+        protocol_.encode_error(
+            {ER_X_CAPABILITY_COMPRESSION_INVALID_ALGORITHM,
+             "Invalid or unsupported value for 'compression.algorithm'",
+             "HY000"});
+
+        send_response_then_handshake();
+
+        return;
       } else {
         Mysqlx::Ok ok_msg;
         protocol_.encode_message(Mysqlx::ServerMessages::OK, ok_msg);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,6 +34,7 @@
 #include "sql/item.h"
 #include "sql/item_sum.h"
 #include "sql/join_optimizer/access_path.h"
+#include "sql/join_optimizer/bit_utils.h"
 #include "sql/join_optimizer/join_optimizer.h"
 #include "sql/join_optimizer/materialize_path_parameters.h"
 #include "sql/join_optimizer/node_map.h"
@@ -42,6 +43,7 @@
 #include "sql/join_optimizer/walk_access_paths.h"
 #include "sql/mem_root_array.h"
 #include "sql/sql_class.h"
+#include "sql/sql_const.h"
 #include "sql/sql_executor.h"
 #include "sql/sql_insert.h"
 #include "sql/sql_lex.h"
@@ -92,6 +94,38 @@ static void ReplaceUpdateValuesWithTempTableFields(
 }
 
 /**
+  Collects the set of items in the item tree that satisfy the following:
+
+  1) Neither the item itself nor any of its descendants have a reference to a
+     ROLLUP expression (item->has_rollup_expr() evaluates to false).
+  2) The item is either the root item or its parent item does not satisfy 1).
+
+  In other words, we do not collect _every_ item without rollup in the tree.
+  Instead we collect the root item of every largest possible subtree where none
+  of the items in the subtree have rollup.
+
+  @param root  The root item of the tree to search.
+  @param items A collection of items. We add items that satisfy the search
+               criteria to this collection.
+ */
+static void CollectItemsWithoutRollup(Item *root,
+                                      mem_root_deque<Item *> *items) {
+  CompileItem(
+      root,
+      [items](Item *item) {
+        if (item->has_rollup_expr()) {
+          // Skip the item and continue searching down the item tree.
+          return true;
+        } else {
+          // Add the item and terminate the search in this branch.
+          items->push_back(item);
+          return false;
+        }
+      },
+      [](Item *item) { return item; });
+}
+
+/**
   Creates a temporary table with columns matching the SELECT list of the given
   query block. (In FinalizePlanForQueryBlock(), the SELECT list of the
   query block is updated to point to the fields in the temporary table, but not
@@ -112,18 +146,38 @@ static TABLE *CreateTemporaryTableFromSelectList(
     THD *thd, Query_block *query_block, Window *window,
     Temp_table_param **temp_table_param_arg, bool after_aggregation) {
   JOIN *join = query_block->join;
+  mem_root_deque<Item *> *items_to_materialize = join->fields;
+
+  // We always materialize the items in join->fields. In the pre-aggregation
+  // case where we have rollup items in join->fields we additionally add the
+  // non-rollup descendants of rollup items to the list of items to materialize.
+  // We need to do this because rollup items are removed from items_to_copy in
+  // the temporary table and the replacement logic depends on base fields being
+  // included.
+  if (!after_aggregation &&
+      std::any_of(items_to_materialize->cbegin(), items_to_materialize->cend(),
+                  [](const Item *item) { return item->has_rollup_expr(); })) {
+    items_to_materialize =
+        new (thd->mem_root) mem_root_deque<Item *>(thd->mem_root);
+    for (Item *item : *join->fields) {
+      items_to_materialize->push_back(item);
+      if (item->has_rollup_expr()) {
+        CollectItemsWithoutRollup(item, items_to_materialize);
+      }
+    }
+  }
 
   Temp_table_param *temp_table_param = new (thd->mem_root) Temp_table_param;
   *temp_table_param_arg = temp_table_param;
   assert(!temp_table_param->precomputed_group_by);
   assert(!temp_table_param->skip_create_table);
   temp_table_param->m_window = window;
-  count_field_types(query_block, temp_table_param, *join->fields,
+  count_field_types(query_block, temp_table_param, *items_to_materialize,
                     /*reset_with_sum_func=*/after_aggregation,
                     /*save_sum_fields=*/after_aggregation);
 
   TABLE *temp_table = create_tmp_table(
-      thd, temp_table_param, *join->fields,
+      thd, temp_table_param, *items_to_materialize,
       /*group=*/nullptr, /*distinct=*/false,
       /*save_sum_fields=*/after_aggregation, query_block->active_options(),
       /*rows_limit=*/HA_POS_ERROR, "<temporary>");
@@ -144,12 +198,18 @@ static TABLE *CreateTemporaryTableFromSelectList(
       }
 
       // Verify that all non-constant, non-window-related items
-      // have been added to items_to_copy.
-      assert(item->const_for_execution() || item->has_wf() ||
-             std::any_of(
-                 temp_table_param->items_to_copy->begin(),
-                 temp_table_param->items_to_copy->end(),
-                 [item](const Func_ptr &ptr) { return ptr.func() == item; }));
+      // have been added to items_to_copy. (For implicitly grouped
+      // queries, non-deterministic expressions that don't reference
+      // any tables are also considered constant by create_tmp_table(),
+      // because they are evaluated exactly once.)
+      assert(
+          item->const_for_execution() || item->has_wf() ||
+          (query_block->is_implicitly_grouped() &&
+           IsSubset(item->used_tables(), RAND_TABLE_BIT | INNER_TABLE_BIT)) ||
+          std::any_of(
+              temp_table_param->items_to_copy->begin(),
+              temp_table_param->items_to_copy->end(),
+              [item](const Func_ptr &ptr) { return ptr.func() == item; }));
     }
   } else {
     // create_tmp_table() doesn't understand that rollup group items
@@ -159,8 +219,8 @@ static TABLE *CreateTemporaryTableFromSelectList(
     // This works because the base fields are always included. The logic is
     // very similar to what happens in change_to_use_tmp_fields_except_sums().
     //
-    // TODO: Consider removing the rollup group items on the inner levels,
-    // similar to what change_to_use_tmp_fields_except_sums() does.
+    // TODO(sgunders): Consider removing the rollup group items on the inner
+    // levels, similar to what change_to_use_tmp_fields_except_sums() does.
     auto new_end = std::remove_if(
         temp_table_param->items_to_copy->begin(),
         temp_table_param->items_to_copy->end(),
@@ -213,6 +273,79 @@ void ReplaceOrderItemsWithTempTableFields(THD *thd, ORDER *order,
     }
   }
 }
+
+#ifndef NDEBUG
+namespace {
+/// @return The tables used by the order items.
+table_map GetUsedTableMap(const ORDER *order) {
+  table_map tables = 0;
+  while (order != nullptr) {
+    tables |= (*order->item)->used_tables();
+    order = order->next;
+  }
+  return tables;
+}
+
+/**
+  Checks if the order items in a SORT access path reference any column that is
+  not available to it. Specifically, it tests that all columns referenced in the
+  order items belong to tables that are available from a child of "sort_path",
+  without any intermediate materialization step between the child and
+  "sort_path".
+
+  Say we have an access path tree such as this:
+
+      -> Sort
+          -> Nested loop join
+              -> Table scan on t1
+              -> Materialize
+                  -> Table scan on t2
+
+  Here, the ordering elements in the sort node may reference columns from t1 or
+  from the materialize node, but not from t2. If they reference columns from t2
+  directly, it means that something is missing from the set of expressions to
+  materialize from t2. Or that something has gone wrong when rewriting the
+  expressions in the ordering elements to point into the temporary table.
+ */
+bool OrderItemsReferenceUnavailableTables(
+    const AccessPath *sort_path, table_map used_tables_before_replacement) {
+  // Find which of the base tables referenced from the order items are
+  // materialized below the sort path.
+  const table_map materialized_base_tables =
+      used_tables_before_replacement &
+      ~GetUsedTableMap(sort_path, /*include_pruned_tables=*/true);
+
+  if (materialized_base_tables == 0) return false;
+
+  // Check if any of those base tables is still referenced directly, instead of
+  // via the temporary table. They should not be referenced directly. Ideally,
+  // we'd want to simply check (*order->item)->used_tables() for each order
+  // element, but temporary tables are indistinguishable from the base table
+  // with tableno() == 0 in the returned table_map (see
+  // Item_field::used_tables(), which returns 1 for temporary tables). So
+  // instead we walk the order items and check each contained Item_field
+  // individually.
+  for (const ORDER *order = sort_path->sort().order; order != nullptr;
+       order = order->next) {
+    if (WalkItem(*order->item, enum_walk::PREFIX,
+                 [materialized_base_tables](Item *item) {
+                   if (item->type() == Item::FIELD_ITEM) {
+                     Item_field *item_field = down_cast<Item_field *>(item);
+                     return item_field->table_ref != nullptr &&
+                            !item_field->is_outer_reference() &&
+                            Overlaps(item_field->table_ref->map(),
+                                     materialized_base_tables);
+                   }
+                   return false;
+                 })) {
+      return true;
+    }
+  }
+
+  return false;
+}
+}  // namespace
+#endif
 
 // If the AccessPath is an operation that copies items into a temporary
 // table (MATERIALIZE, STREAM or WINDOW) within the same query block,
@@ -295,32 +428,41 @@ static void UpdateReferencesToMaterializedItems(
     }
   } else if (path->type == AccessPath::SORT) {
     assert(path->sort().filesort == nullptr);
+
+#ifndef NDEBUG
+    const table_map used_tables_before_replacement =
+        GetUsedTableMap(path->sort().order) & ~PSEUDO_TABLE_BITS;
+#endif
+
     for (const Func_ptr_array *earlier_replacement : *applied_replacements) {
       ReplaceOrderItemsWithTempTableFields(thd, path->sort().order,
                                            *earlier_replacement);
     }
 
+    assert(!OrderItemsReferenceUnavailableTables(
+        path, used_tables_before_replacement));
+
     // Set up a Filesort object for this sort.
-    Mem_root_array<TABLE *> tables = CollectTables(thd, path);
-    const ha_rows limit_rows = path->sort().use_limit
-                                   ? join->query_expression()->select_limit_cnt
-                                   : HA_POS_ERROR;
     path->sort().filesort = new (thd->mem_root)
-        Filesort(thd, std::move(tables),
-                 /*keep_buffers=*/false, path->sort().order, limit_rows,
-                 path->sort().remove_duplicates, /*force_sort_positions=*/false,
+        Filesort(thd, CollectTables(thd, path),
+                 /*keep_buffers=*/false, path->sort().order, path->sort().limit,
+                 path->sort().remove_duplicates, path->sort().force_sort_rowids,
                  path->sort().unwrap_rollup);
     join->filesorts_to_cleanup.push_back(path->sort().filesort);
     if (!path->sort().filesort->using_addon_fields()) {
       FindTablesToGetRowidFor(path);
     }
   } else if (path->type == AccessPath::FILTER) {
-    // Only really relevant for in2exists filters that run after
-    // windowing.
+    // Only really relevant for in2exists filters that run after windowing, and
+    // for some cases of HAVING clauses.
     for (const Func_ptr_array *earlier_replacement : *applied_replacements) {
+      // Replace materialized items in the filter. If this is after aggregation,
+      // the HAVING clause may be wrapped in Item_aggregate_ref, so we need to
+      // see through it and don't require exact match.
+      const bool need_exact_match = !after_aggregation;
       path->filter().condition = FindReplacementOrReplaceMaterializedItems(
           thd, path->filter().condition, *earlier_replacement,
-          /*need_exact_match=*/true);
+          need_exact_match);
     }
   } else if (path->type == AccessPath::REMOVE_DUPLICATES) {
     Item **group_items = path->remove_duplicates().group_items;
@@ -378,6 +520,7 @@ static void DelayedCreateTemporaryTable(THD *thd, Query_block *query_block,
         path->materialize().param->table =
             path->materialize().table_path->table_scan().table = table;
       }
+
       EstimateMaterializeCost(thd, path);
     }
     *last_window_temp_table = nullptr;
@@ -429,19 +572,6 @@ static void FinalizeWindowPath(
     }
   }
   window->make_special_rows_cache(thd, path->window().temp_table);
-}
-
-static bool ContainsMaterialization(AccessPath *path) {
-  bool found = false;
-  WalkAccessPaths(path, /*join=*/nullptr,
-                  WalkAccessPathPolicy::STOP_AT_MATERIALIZATION,
-                  [&found](AccessPath *sub_path, JOIN *) {
-                    if (sub_path->type == AccessPath::MATERIALIZE) {
-                      found = true;
-                    }
-                    return found;
-                  });
-  return found;
 }
 
 static Item *AddCachesAroundConstantConditions(Item *item) {
@@ -522,40 +652,51 @@ static Item *AddCachesAroundConstantConditions(Item *item) {
       present its own challenges.
     - Join conditions.
  */
-bool FinalizePlanForQueryBlock(THD *thd, Query_block *query_block,
-                               AccessPath *root_path) {
+bool FinalizePlanForQueryBlock(THD *thd, Query_block *query_block) {
   assert(query_block->join->needs_finalize);
+  query_block->join->needs_finalize = false;
+
+  AccessPath *const root_path = query_block->join->root_access_path();
+  assert(root_path != nullptr);
+  if (root_path->type == AccessPath::EQ_REF) {
+    // None of the finalization below is relevant to point selects, so just
+    // return immediately.
+    return false;
+  }
+
+  // If the query is offloaded to an external executor, we don't need to create
+  // the internal temporary tables or filesort objects, or rewrite the Item tree
+  // to point into them.
+  if (!IteratorsAreNeeded(thd, root_path)) {
+    return false;
+  }
 
   Query_block *old_query_block = thd->lex->current_query_block();
   thd->lex->set_current_query_block(query_block);
 
-  // If we have a sort node (e.g. for GROUP BY) with a materialization under it,
-  // we need to make sure that what we sort on is included in the
-  // materialization. (We do this by putting it into the field list, and then
-  // removing it at the end of the function.) This is a bit overconservative
-  // (e.g., we don't need to include it in later materializations, too), but the
-  // situation should be fairly rare.
-  Mem_root_array<std::pair<Item *, bool>> extra_fields_needed(thd->mem_root);
-  mem_root_deque<Item *> *base_fields = query_block->join->fields;
+  // We might have stacked multiple FILTERs on top of each other.
+  // Combine these into a single FILTER:
   WalkAccessPaths(
       root_path, query_block->join, WalkAccessPathPolicy::ENTIRE_QUERY_BLOCK,
-      [&extra_fields_needed](AccessPath *path, JOIN *join) {
-        if (path->type == AccessPath::SORT && ContainsMaterialization(path)) {
-          for (ORDER *order = path->sort().order; order != nullptr;
-               order = order->next) {
-            Item *item = *order->item;
-            if (std::none_of(join->fields->begin(), join->fields->end(),
-                             [item](Item *other_item) {
-                               return item->eq(other_item, /*binary_cmp=*/true);
-                             })) {
-              extra_fields_needed.push_back(std::make_pair(item, item->hidden));
-              item->hidden = true;
-              join->fields->push_front(item);
-            }
+      [](AccessPath *path, JOIN *join [[maybe_unused]]) {
+        if (path->type == AccessPath::FILTER) {
+          AccessPath *child = path->filter().child;
+          if (child->type == AccessPath::FILTER &&
+              child->filter().materialize_subqueries ==
+                  path->filter().materialize_subqueries) {
+            // Combine conditions into a single FILTER.
+            Item *condition = new Item_cond_and(child->filter().condition,
+                                                path->filter().condition);
+            condition->quick_fix_field();
+            condition->update_used_tables();
+            condition->apply_is_true();
+            path->filter().condition = condition;
+            path->filter().child = child->filter().child;
           }
         }
         return false;
-      });
+      },
+      /*post_order_traversal=*/true);
 
   Mem_root_array<const Func_ptr_array *> applied_replacements(thd->mem_root);
   TABLE *last_window_temp_table = nullptr;
@@ -615,12 +756,8 @@ bool FinalizePlanForQueryBlock(THD *thd, Query_block *query_block,
       },
       /*post_order_traversal=*/true);
 
-  for (const std::pair<Item *, bool> &item_and_hidden : extra_fields_needed) {
-    item_and_hidden.first->hidden = item_and_hidden.second;
-    base_fields->pop_front();
-  }
+  if (query_block->join->push_to_engines()) return true;
 
-  query_block->join->needs_finalize = false;
   thd->lex->set_current_query_block(old_query_block);
   return error;
 }

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -35,8 +35,8 @@
 #include "cluster_metadata.h"
 #include "dim.h"
 #include "metadata_cache_gr.h"
-#include "metadata_factory.h"
 #include "mock_metadata.h"
+#include "mock_metadata_factory.h"
 #include "mysql_session_replayer.h"
 #include "tcp_address.h"
 #include "test/helpers.h"
@@ -56,10 +56,11 @@ class MetadataCacheTest : public ::testing::Test {
       : mf(metadata_cache::MetadataCacheMySQLSessionConfig{
             {"admin", "admin"}, 1, 1, 1}),
         cache(kRouterId, "0000-0001", "", {TCPAddress("localhost", 32275)},
-              get_instance(mysqlrouter::ClusterType::GR_V1,
-                           metadata_cache::MetadataCacheMySQLSessionConfig{
-                               {"admin", "admin"}, 1, 1, 1},
-                           mysqlrouter::SSLOptions(), false, 0),
+              mock_metadata_factory_get_instance(
+                  mysqlrouter::ClusterType::GR_V1,
+                  metadata_cache::MetadataCacheMySQLSessionConfig{
+                      {"admin", "admin"}, 1, 1, 1},
+                  mysqlrouter::SSLOptions(), false, 0),
               metadata_cache::MetadataCacheTTLConfig{10s, -1s, 20s},
               mysqlrouter::SSLOptions(),
               {mysqlrouter::TargetCluster::TargetType::ByName, "cluster-1"},
@@ -83,7 +84,7 @@ TEST_F(MetadataCacheTest, ValidReplicasetTest_1) {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// Test Metadata Cache vs metadata server availabilty
+// Test Metadata Cache vs metadata server availability
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -127,7 +128,8 @@ class MetadataCacheTest2 : public ::testing::Test {
                      });
 
     m.expect_query(
-        "SELECT R.replicaset_name, I.mysql_server_uuid, "
+        "SELECT F.cluster_id, F.cluster_name, R.replicaset_name, "
+        "I.mysql_server_uuid, "
         "I.addresses->>'$.mysqlClassic', I.addresses->>'$.mysqlX' FROM "
         "mysql_innodb_cluster_metadata.clusters "
         "AS F JOIN mysql_innodb_cluster_metadata.replicasets AS R ON "
@@ -136,16 +138,19 @@ class MetadataCacheTest2 : public ::testing::Test {
         "= I.replicaset_id WHERE F.cluster_name = 'cluster-1' "
         "AND R.attributes->>'$.group_replication_group_name' = '0000-0001'");
     m.then_return(
-        8,
-        {// replicaset_name, mysql_server_uuid,
+        5,
+        {// cluster_id, cluster_name, replicaset_name, mysql_server_uuid,
          // I.addresses->>'$.mysqlClassic', I.addresses->>'$.mysqlX'
-         {m.string_or_null("cluster-1"), m.string_or_null("uuid-server1"),
+         {m.string_or_null("cluster-id-1"), m.string_or_null("cluster-1"),
+          m.string_or_null("default"), m.string_or_null("uuid-server1"),
           m.string_or_null("localhost:3000"),
           m.string_or_null("localhost:30000")},
-         {m.string_or_null("cluster-1"), m.string_or_null("uuid-server2"),
+         {m.string_or_null("cluster-id-1"), m.string_or_null("cluster-1"),
+          m.string_or_null("default"), m.string_or_null("uuid-server2"),
           m.string_or_null("localhost:3001"),
           m.string_or_null("localhost:30010")},
-         {m.string_or_null("cluster-1"), m.string_or_null("uuid-server3"),
+         {m.string_or_null("cluster-id-1"), m.string_or_null("cluster-1"),
+          m.string_or_null("default"), m.string_or_null("uuid-server3"),
           m.string_or_null("localhost:3002"),
           m.string_or_null("localhost:30020")}});
 

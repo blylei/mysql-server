@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -58,7 +58,6 @@ class Opt_trace_context;
 
 using std::max;
 using std::min;
-using std::move;
 
 #ifndef NDEBUG
 static void print_ror_scans_arr(TABLE *table, const char *msg,
@@ -82,7 +81,7 @@ void trace_basic_info_rowid_intersection(THD *thd, const AccessPath *path,
                                          const RANGE_OPT_PARAM *param,
                                          Opt_trace_object *trace_object) {
   trace_object->add_alnum("type", "index_roworder_intersect")
-      .add("rows", path->num_output_rows)
+      .add("rows", path->num_output_rows())
       .add("cost", path->cost)
       .add("covering", path->rowid_intersection().is_covering)
       .add("clustered_pk_scan",
@@ -170,9 +169,11 @@ static ROR_SCAN_INFO *make_ror_scan(const RANGE_OPT_PARAM *param, int idx,
       param->table->file->index_scan_cost(ror_scan->keynr, 1, rows);
 
   Quick_ranges ranges(param->return_mem_root);
+  unsigned num_exact_key_parts_unused;
   if (get_ranges_from_tree(param->return_mem_root, param->table,
                            param->key[idx], param->real_keynr[idx], sel_root,
-                           MAX_REF_PARTS, &ror_scan->used_key_parts, &ranges)) {
+                           MAX_REF_PARTS, &ror_scan->used_key_parts,
+                           &num_exact_key_parts_unused, &ranges)) {
     return nullptr;
   }
   ror_scan->ranges = {&ranges[0], ranges.size()};
@@ -679,7 +680,7 @@ static AccessPath *MakeAccessPath(ROR_SCAN_INFO *scan, TABLE *table,
   // TODO(sgunders): The initial cost is high (it needs to read all rows and
   // sort), so we should not have zero init_cost.
   path->cost = scan->index_read_cost.total_cost();
-  path->num_output_rows = scan->records;
+  path->set_num_output_rows(scan->records);
 
   path->index_range_scan().used_key_part = used_key_part;
   path->index_range_scan().ranges = &scan->ranges[0];
@@ -705,8 +706,6 @@ static AccessPath *MakeAccessPath(ROR_SCAN_INFO *scan, TABLE *table,
   SYNOPSIS
     get_best_ror_intersect()
       param            Parameter from test_quick_select function.
-      order_direction  The sort order the range access method must be able
-                       to provide. Three-value logic: asc/desc/don't care
       tree             Transformed restriction condition to be used to look
                        for ROR scans.
       cost_est         Do not return read plans with cost > cost_est.
@@ -769,8 +768,8 @@ static AccessPath *MakeAccessPath(ROR_SCAN_INFO *scan, TABLE *table,
 
 AccessPath *get_best_ror_intersect(
     THD *thd, const RANGE_OPT_PARAM *param, TABLE *table,
-    bool index_merge_intersect_allowed, enum_order order_direction,
-    SEL_TREE *tree, const MY_BITMAP *needed_fields, double cost_est,
+    bool index_merge_intersect_allowed, SEL_TREE *tree,
+    const MY_BITMAP *needed_fields, double cost_est,
     bool force_index_merge_result, bool reuse_handler) {
   uint idx;
   Cost_estimate min_cost;
@@ -795,8 +794,6 @@ AccessPath *get_best_ror_intersect(
       trace_ror.add("need_tracing", true);
     return nullptr;
   }
-
-  if (order_direction == ORDER_DESC) return nullptr;
 
   /*
     Step1: Collect ROR-able SEL_ARGs and create ROR_SCAN_INFO for each of
@@ -983,11 +980,11 @@ AccessPath *get_best_ror_intersect(
     AccessPath *path = new (param->return_mem_root) AccessPath;
     path->type = AccessPath::ROWID_INTERSECTION;
     path->cost = intersect_best->total_cost.total_cost();
-    /* Prevent divisons by zero */
+    /* Prevent divisions by zero */
     double best_rows = max(intersect_best->out_rows, 1.0);
     table->quick_condition_rows =
         min<ha_rows>(table->quick_condition_rows, best_rows);
-    path->num_output_rows = best_rows;
+    path->set_num_output_rows(best_rows);
 
     path->rowid_intersection().table = table;
     path->rowid_intersection().children = children;
@@ -1000,14 +997,14 @@ AccessPath *get_best_ror_intersect(
     path->rowid_intersection().reuse_handler = reuse_handler;
     path->rowid_intersection().is_covering = intersect_best->is_covering;
 
-    trace_ror.add("rows", path->num_output_rows)
+    trace_ror.add("rows", path->num_output_rows())
         .add("cost", path->cost)
         .add("covering", intersect_best->is_covering)
         .add("chosen", true);
 
     DBUG_PRINT("info", ("Returning non-covering ROR-intersect plan:"
                         "cost %g, records %g",
-                        path->cost, path->num_output_rows));
+                        path->cost, path->num_output_rows()));
     return path;
   } else {
     trace_ror.add("chosen", false)

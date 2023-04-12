@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,7 +29,6 @@ namespace charset_bug32788301_unittest {
 
 CHARSET_INFO *init_collation(const char *name) {
   MY_CHARSET_LOADER loader;
-  my_charset_loader_init_mysys(&loader);
   return my_collation_get_by_name(&loader, name, MYF(0));
 }
 

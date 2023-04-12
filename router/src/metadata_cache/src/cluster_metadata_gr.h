@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -25,13 +25,22 @@
 #ifndef METADATA_CACHE_CLUSTER_METADATA_GR_INCLUDED
 #define METADATA_CACHE_CLUSTER_METADATA_GR_INCLUDED
 
+#include "mysqlrouter/metadata_cache_export.h"
+
 #include "cluster_metadata.h"
 #include "gr_notifications_listener.h"
 
 struct GroupReplicationMember;
 class GRMetadataBackend;
 
-class METADATA_API GRClusterMetadata : public ClusterMetadata {
+enum class GRClusterStatus {
+  AvailableWritable,
+  AvailableReadOnly,
+  UnavailableRecovering,
+  Unavailable
+};
+
+class METADATA_CACHE_EXPORT GRClusterMetadata : public ClusterMetadata {
  public:
   /** @brief Constructor
    *
@@ -71,6 +80,8 @@ class METADATA_API GRClusterMetadata : public ClusterMetadata {
    * single Cluster)
    * @param clusterset_id UUID of the ClusterSet the Cluster belongs to (if
    * bootstrapped as a ClusterSet)
+   * @param whole_topology return all usable nodes, ignore potential metadata
+   * filters or policies (like target_cluster etc.)
    * @param [out] instance_id of the server the metadata was fetched from
    * @return object containing cluster topology information in case of success,
    * or error code in case of failure
@@ -82,23 +93,22 @@ class METADATA_API GRClusterMetadata : public ClusterMetadata {
       mysqlrouter::TargetCluster &target_cluster, const unsigned router_id,
       const metadata_cache::metadata_servers_list_t &metadata_servers,
       bool needs_writable_node, const std::string &group_name,
-      const std::string &clusterset_id, std::size_t &instance_id) override;
+      const std::string &clusterset_id, bool whole_topology,
+      std::size_t &instance_id) override;
 
   /** @brief Initializes the notifications listener thread (if a given cluster
    * type supports it)
    *
-   * @param instances vector of the current cluster nodes
-   * @param target_cluster object identifying the Cluster this operation refers
+   * @param cluster_topology current topology of the monitored Cluster(s)
    * to
    * @param callback  callback function to get called when the GR notification
    *                  was received
    */
   void setup_notifications_listener(
-      const std::vector<metadata_cache::ManagedInstance> &instances,
-      const mysqlrouter::TargetCluster &target_cluster,
+      const metadata_cache::ClusterTopology &cluster_topology,
       const GRNotificationListener::NotificationClb &callback) override {
     if (gr_notifications_listener_)
-      gr_notifications_listener_->setup(instances, target_cluster, callback);
+      gr_notifications_listener_->setup(cluster_topology, callback);
   }
 
   /** @brief Deinitializes the notifications listener thread
@@ -129,11 +139,14 @@ class METADATA_API GRClusterMetadata : public ClusterMetadata {
       const mysqlrouter::TargetCluster &target_cluster,
       const std::string &cluster_type_specific_id) override;
 
+  std::optional<std::chrono::seconds>
+  get_periodic_stats_update_frequency() noexcept override;
+
  protected:
   /** @brief Queries the metadata server for the list of instances that belong
    * to the desired cluster.
    */
-  metadata_cache::ManagedCluster fetch_instances_from_metadata_server(
+  metadata_cache::ClusterTopology fetch_instances_from_metadata_server(
       const mysqlrouter::TargetCluster &target_cluster,
       const std::string &cluster_type_specific_id);
 
@@ -148,10 +161,9 @@ class METADATA_API GRClusterMetadata : public ClusterMetadata {
    *
    * The information is pulled from GR maintained performance_schema tables.
    */
-  void update_cluster_status(const mysqlrouter::TargetCluster &target_cluster,
-                             metadata_cache::ManagedCluster &cluster);
+  void update_cluster_status(metadata_cache::ManagedCluster &cluster);
 
-  metadata_cache::ClusterStatus check_cluster_status(
+  GRClusterStatus check_cluster_status(
       std::vector<metadata_cache::ManagedInstance> &instances,
       const std::map<std::string, GroupReplicationMember> &member_status,
       bool &metadata_gr_discrepancy) const noexcept;

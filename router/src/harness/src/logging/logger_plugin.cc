@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -30,6 +30,7 @@
 #include "consolelog_plugin.h"
 #include "dim.h"
 #include "filelog_plugin.h"
+#include "mysql/harness/logging/supported_logger_options.h"
 #include "mysql/harness/string_utils.h"
 #include "mysql/harness/utility/string.h"  // join
 
@@ -75,8 +76,9 @@ static inline bool legal_consolelog_destination(
 
   return true;
 }
+namespace {
 
-static HandlerPtr create_logging_sink(
+HandlerPtr create_logging_sink(
     const std::string &sink_name, const mysql_harness::LoaderConfig &config,
     const std::string &default_log_filename,
     const mysql_harness::logging::LogLevel default_log_level,
@@ -232,6 +234,8 @@ static HandlerPtr create_logging_sink(
 
   return result;
 }
+
+}  // namespace
 
 void create_plugin_loggers(const mysql_harness::LoaderConfig &config,
                            mysql_harness::logging::Registry &registry,
@@ -433,4 +437,6 @@ mysql_harness::Plugin harness_plugin_logger = {
     nullptr,  // start
     nullptr,  // stop
     false,    // declares_readiness
+    logger_supported_options.size(),
+    logger_supported_options.data(),
 };

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -342,7 +342,7 @@ void make_bad_connection(uint16_t port) {
   // To simplify code, instead of alternating between reading and writing
   // protocol packets, we write a lot of garbage upfront, and then read
   // whatever Router sends back. Router will read what we wrote in chunks,
-  // inbetween its writes, thinking they're replies to its handshake packets.
+  // in between its writes, thinking they're replies to its handshake packets.
   // Eventually it will finish the handshake with error and disconnect.
   std::vector<char> bogus_data(1024, 0);
   const auto write_res =

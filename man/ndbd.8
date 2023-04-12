@@ -2,12 +2,12 @@
 .\"     Title: ndbd
 .\"    Author: [FIXME: author] [see http://docbook.sf.net/el/author]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 11/26/2021
+.\"      Date: 11/26/2022
 .\"    Manual: MySQL Database System
 .\"    Source: MySQL 8.0
 .\"  Language: English
 .\"
-.TH "NDBD" "8" "11/26/2021" "MySQL 8\&.0" "MySQL Database System"
+.TH "NDBD" "8" "11/26/2022" "MySQL 8\&.0" "MySQL Database System"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -91,6 +91,8 @@ lB l l
 lB l l
 lB l l
 lB l l
+lB l l
+lB l l
 lB l l.
 T{
 .PP
@@ -133,9 +135,7 @@ T}:T{
 T}
 T{
 .PP
-\fB--connect-retry-delay=#\fR,
-.PP
-\fB \fR\fB-r #\fR\fB \fR
+\fB \fR\fB--connect-retry-delay=#\fR\fB \fR
 T}:T{
 Time to wait between attempts to contact a management server, in
               seconds; 0 means do not wait between attempts
@@ -200,6 +200,25 @@ Also read groups with concat(group, suffix)
 T}:T{
 .PP
 (Supported in all NDB releases based on MySQL 8.0)
+T}
+T{
+.PP
+\fB \fR\fB--filesystem-password=password\fR\fB \fR
+T}:T{
+Password for node file system encryption; can be passed from stdin, tty,
+              or my.cnf file
+T}:T{
+.PP
+ADDED: 8.0.31
+T}
+T{
+.PP
+\fB \fR\fB--filesystem-password-from-stdin={TRUE|FALSE}\fR\fB \fR
+T}:T{
+Get password for node file system encryption, passed from stdin
+T}:T{
+.PP
+ADDED: 8.0.31
 T}
 T{
 .PP
@@ -353,7 +372,7 @@ Enable optimizations for selection of nodes for transactions. Enabled by
               disable
 T}:T{
 .PP
-(Supported in all NDB releases based on MySQL 8.0)
+REMOVED: 8.0.31
 T}
 T{
 .PP
@@ -871,6 +890,80 @@ Also read groups with concat(group, suffix)\&.
 .sp -1
 .IP \(bu 2.3
 .\}
+\fB\-\-filesystem\-password\fR
+.TS
+allbox tab(:);
+lB l
+lB l.
+T{
+Command-Line Format
+T}:T{
+--filesystem-password=password
+T}
+T{
+Introduced
+T}:T{
+8.0.31
+T}
+.TE
+.sp 1
+Pass the filesystem encryption and decryption password to the data node process using
+stdin,
+tty, or the
+my\&.cnf
+file\&.
+.sp
+Requires
+EncryptedFileSystem = 1\&.
+.sp
+For more information, see
+Section\ \&23.6.14, \(lqFile System Encryption for NDB Cluster\(rq\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fB\-\-filesystem\-password\-from\-stdin\fR
+.TS
+allbox tab(:);
+lB l
+lB l.
+T{
+Command-Line Format
+T}:T{
+--filesystem-password-from-stdin={TRUE|FALSE}
+T}
+T{
+Introduced
+T}:T{
+8.0.31
+T}
+.TE
+.sp 1
+Pass the filesystem encryption and decryption password to the data node process from
+stdin
+(only)\&.
+.sp
+Requires
+EncryptedFileSystem = 1\&.
+.sp
+For more information, see
+Section\ \&23.6.14, \(lqFile System Encryption for NDB Cluster\(rq\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
 \fB\-\-foreground\fR
 .TS
 allbox tab(:);
@@ -1037,7 +1130,7 @@ affect backup files that have already been created by the affected node\&.
 Prior to NDB 8\&.0\&.21, the
 \fB\-\-initial\fR
 option also did not affect any Disk Data files\&. In NDB 8\&.0\&.21 and later, when used to perform an initial restart of the cluster, the option causes the removal of all data files associated with Disk Data tablespaces and undo log files associated with log file groups that existed previously on this data node (see
-Section\ \&23.6.10, \(lqNDB Cluster Disk Data Tables\(rq)\&.
+Section\ \&23.6.11, \(lqNDB Cluster Disk Data Tables\(rq)\&.
 .sp
 This option also has no effect on recovery of data by a data node that is just starting (or restarting) from data nodes that are already running (unless they also were started with
 \fB\-\-initial\fR, as part of an initial restart)\&. This recovery of data occurs automatically, and requires no user intervention in an NDB Cluster that is running normally\&.
@@ -1367,11 +1460,17 @@ Set node ID for this node, overriding any ID set by \-\-ndb\-connectstring\&.
 \fB\-\-ndb\-optimized\-node\-selection\fR
 .TS
 allbox tab(:);
+lB l
 lB l.
 T{
 Command-Line Format
 T}:T{
 --ndb-optimized-node-selection
+T}
+T{
+Removed
+T}:T{
+8.0.31
 T}
 .TE
 .sp 1
@@ -1837,7 +1936,7 @@ Section\ \&23.2.7, \(lqKnown Limitations of NDB Cluster\(rq\&.
 .SH "COPYRIGHT"
 .br
 .PP
-Copyright \(co 1997, 2021, Oracle and/or its affiliates.
+Copyright \(co 1997, 2022, Oracle and/or its affiliates.
 .PP
 This documentation is free software; you can redistribute it and/or modify it only under the terms of the GNU General Public License as published by the Free Software Foundation; version 2 of the License.
 .PP

@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2013, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,6 +56,11 @@ int group_replication_after_dd_upgrade(Server_state_param *) { return 0; }
 int group_replication_after_server_shutdown(Server_state_param *) {
   enable_server_shutdown_status();
   plugin_group_replication_stop();
+  /*
+    Terminate mysql_thread session when client connections are closed,
+    otherwise server will block waiting for them to terminate.
+  */
+  mysql_thread_handler_finalize();
 
   return 0;
 }

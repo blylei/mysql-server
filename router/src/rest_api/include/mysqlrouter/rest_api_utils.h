@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -70,7 +70,7 @@ bool ensure_http_method(HttpRequest &req, HttpMethod::Bitset allowed_methods);
 /**
  * ensure request is authenticated.
  *
- * sends HTTP-response with status 401 if authentication was not succesful.
+ * sends HTTP-response with status 401 if authentication was not successful.
  *
  * @returns success
  * @retval true if request is authenticaticated

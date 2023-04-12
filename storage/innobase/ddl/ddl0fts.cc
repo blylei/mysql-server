@@ -1,6 +1,6 @@
 /****************************************************************************
 
-Copyright (c) 2010, 2021, Oracle and/or its affiliates.
+Copyright (c) 2010, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,6 +30,8 @@ Created 10/13/2010 Jimmy Yang */
 
 #include <sys/types.h>
 
+#include "univ.i"
+
 #include "ddl0ddl.h"
 #include "ddl0fts.h"
 #include "ddl0impl-builder.h"
@@ -38,6 +40,7 @@ Created 10/13/2010 Jimmy Yang */
 #include "fts0plugin.h"
 #include "lob0lob.h"
 #include "os0thread-create.h"
+#include "sql/sql_class.h"
 
 #include <current_thd.h>
 
@@ -140,10 +143,9 @@ struct FTS::Parser {
   /** Data structures for building an index. */
   struct Handler {
     /** Constructor.
-    @param[in] id             Auxiliary index ID.
     @param[in,out] index      Index to create.
     @param[in] size           IO buffer size. */
-    explicit Handler(size_t id, dict_index_t *index, size_t size) noexcept;
+    explicit Handler(dict_index_t *index, size_t size) noexcept;
 
     /** Destructor. */
     ~Handler() noexcept;
@@ -183,6 +185,8 @@ struct FTS::Parser {
   /** Set the parent thread state.
   @param[in] state              The parent state. */
   void set_parent_state(Thread_state state) noexcept { m_parent_state = state; }
+
+  Diagnostics_area da{false};
 
  private:
   /** Tokenize incoming text data and add to the sort buffer.
@@ -296,10 +300,10 @@ struct FTS::Inserter {
   }
 
   /** Write out a single word's data as new entry/entries in the INDEX table.
-  @param[in] ins_ctx	            Insert context.
-  @param[in] word	                Word string.
-  @param[in] node	                Node columns.
-  @return	DB_SUCCUESS if insertion runs fine, otherwise error code */
+  @param[in] ins_ctx                Insert context.
+  @param[in] word                       Word string.
+  @param[in] node                       Node columns.
+  @return       DB_SUCCUESS if insertion runs fine, otherwise error code */
   dberr_t write_node(const Insert *ins_ctx, const fts_string_t *word,
                      const fts_node_t *node) noexcept;
 
@@ -334,8 +338,7 @@ struct FTS::Inserter {
   Handlers m_handlers{};
 };
 
-FTS::Parser::Handler::Handler(size_t id, dict_index_t *index,
-                              size_t size) noexcept
+FTS::Parser::Handler::Handler(dict_index_t *index, size_t size) noexcept
     : m_file(), m_key_buffer(index, size), m_aligned_buffer() {}
 
 FTS::Parser::Handler::~Handler() noexcept {}
@@ -358,7 +361,7 @@ dberr_t FTS::Parser::init(size_t n_threads) noexcept {
 
   for (size_t i = 0; i < FTS_NUM_AUX_INDEX; ++i) {
     m_handlers[i] = Handler_ptr(
-        ut::new_withkey<Handler>(ut::make_psi_memory_key(mem_key_ddl), i,
+        ut::new_withkey<Handler>(ut::make_psi_memory_key(mem_key_ddl),
                                  m_dup->m_index, buffer_size.first),
         [](Handler *handler) { ut::delete_(handler); });
 
@@ -463,6 +466,9 @@ dict_index_t *FTS::create_index(dict_index_t *index, dict_table_t *table,
   field->col->prtype = idx_field->col->prtype | DATA_NOT_NULL;
   field->col->mbminmaxlen = idx_field->col->mbminmaxlen;
   field->fixed_len = 0;
+  field->col->set_version_added(UINT8_UNDEFINED);
+  field->col->set_version_dropped(UINT8_UNDEFINED);
+  field->col->set_phy_pos(UINT32_UNDEFINED);
 
   /* Doc ID */
   field = new_index->get_field(1);
@@ -507,6 +513,9 @@ dict_index_t *FTS::create_index(dict_index_t *index, dict_table_t *table,
   field->col->prtype = DATA_NOT_NULL | DATA_BINARY_TYPE;
 
   field->col->mbminmaxlen = 0;
+  field->col->set_version_added(UINT8_UNDEFINED);
+  field->col->set_version_dropped(UINT8_UNDEFINED);
+  field->col->set_phy_pos(UINT32_UNDEFINED);
 
   /* The third field is on the word's position in the original doc */
   field = new_index->get_field(2);
@@ -522,6 +531,9 @@ dict_index_t *FTS::create_index(dict_index_t *index, dict_table_t *table,
   field->fixed_len = 4;
   field->col->prtype = DATA_NOT_NULL;
   field->col->mbminmaxlen = 0;
+  field->col->set_version_added(UINT8_UNDEFINED);
+  field->col->set_version_dropped(UINT8_UNDEFINED);
+  field->col->set_phy_pos(UINT32_UNDEFINED);
 
   return new_index;
 }
@@ -818,7 +830,7 @@ void FTS::Parser::parse(Builder *builder) noexcept {
 
   auto table = m_ctx.new_table();
   auto old_table = m_ctx.old_table();
-  auto blob_heap = mem_heap_create(512);
+  auto blob_heap = mem_heap_create(512, UT_LOCATION_HERE);
 
   memset(&doc, 0, sizeof(doc));
 
@@ -843,7 +855,11 @@ void FTS::Parser::parse(Builder *builder) noexcept {
   auto clean_up = [&](dberr_t err) {
     mem_heap_free(blob_heap);
 
-    IF_ENABLED("ddl_fts_write_failure", err = DB_TEMP_FILE_WRITE_FAIL;)
+#ifdef UNIV_DEBUG
+    if (Sync_point::enabled(m_ctx.thd(), "ddl_fts_write_failure")) {
+      err = DB_TEMP_FILE_WRITE_FAIL;
+    };
+#endif
 
     if (err != DB_SUCCESS) {
       builder->set_error(err);
@@ -879,7 +895,7 @@ void FTS::Parser::parse(Builder *builder) noexcept {
         auto &file = handler->m_file;
         handler->m_offsets.push_back(file.m_size);
 
-        auto persistor = [&](IO_buffer io_buffer, os_offset_t &n) -> dberr_t {
+        auto persistor = [&](IO_buffer io_buffer, os_offset_t &) -> dberr_t {
           return builder->append(file, io_buffer);
         };
 
@@ -995,7 +1011,7 @@ void FTS::Parser::parse(Builder *builder) noexcept {
 
       handler->m_offsets.push_back(file.m_size);
 
-      auto persistor = [&](IO_buffer io_buffer, os_offset_t &n) -> dberr_t {
+      auto persistor = [&](IO_buffer io_buffer, os_offset_t &) -> dberr_t {
         return builder->append(file, io_buffer);
       };
 
@@ -1079,7 +1095,7 @@ dberr_t FTS::Inserter::write_node(const Insert *ins_ctx,
   }
 
   {
-    /* The third and fourth fileds(TRX_ID, ROLL_PTR) are filled already.*/
+    /* The third and fourth fields(TRX_ID, ROLL_PTR) are filled already.*/
     /* The fifth field is last_doc_id */
     auto field = dtuple_get_nth_field(tuple, 4);
     fts_write_doc_id((byte *)&last_doc_id, node->last_doc_id);
@@ -1138,7 +1154,7 @@ void FTS::Inserter::insert_tuple(Insert *ins_ctx, fts_tokenizer_word_t *word,
                                  const dtuple_t *dtuple) noexcept {
   fts_node_t *fts_node;
 
-  /* Get fts_node for the FTS auxillary INDEX table */
+  /* Get fts_node for the FTS auxiliary INDEX table */
   if (ib_vector_size(word->nodes) > 0) {
     fts_node = static_cast<fts_node_t *>(ib_vector_last(word->nodes));
   } else {
@@ -1180,7 +1196,7 @@ void FTS::Inserter::insert_tuple(Insert *ins_ctx, fts_tokenizer_word_t *word,
   if (innobase_fts_text_cmp(ins_ctx->m_charset, &word->text, &token_word) !=
       0) {
     /* Getting a new word, flush the last position info
-    for the currnt word in fts_node */
+    for the current word in fts_node */
     if (ib_vector_size(positions) > 0) {
       fts_cache_node_add_positions(nullptr, fts_node, *in_doc_id, positions);
     }
@@ -1255,7 +1271,7 @@ dberr_t FTS::Inserter::insert(Builder *builder,
 
   auto trx = trx_allocate_for_background();
 
-  trx_start_if_not_started(trx, true);
+  trx_start_if_not_started(trx, true, UT_LOCATION_HERE);
 
   trx->op_info = "inserting index entries";
 
@@ -1263,7 +1279,7 @@ dberr_t FTS::Inserter::insert(Builder *builder,
 
   ins_ctx.m_doc_id_32_bit = m_doc_id_32_bit;
 
-  auto tuple_heap = mem_heap_create(512);
+  auto tuple_heap = mem_heap_create(512, UT_LOCATION_HERE);
 
   auto index = m_dup->m_index;
 
@@ -1357,7 +1373,6 @@ dberr_t FTS::Inserter::insert(Builder *builder,
   Merge_cursor cursor(builder, nullptr, nullptr);
 
   {
-    size_t i{};
     const auto n_buffers = handler->m_files.size();
     const auto io_buffer_size = m_ctx.merge_io_buffer_size(n_buffers);
 
@@ -1369,9 +1384,6 @@ dberr_t FTS::Inserter::insert(Builder *builder,
       if (err != DB_SUCCESS) {
         return err;
       }
-
-      ++i;
-
       total_rows += file.m_n_recs;
     }
   }
@@ -1391,7 +1403,7 @@ dberr_t FTS::Inserter::insert(Builder *builder,
 
   doc_id_t doc_id{};
   dtuple_t *dtuple{};
-  auto heap = mem_heap_create(1000);
+  auto heap = mem_heap_create(1000, UT_LOCATION_HERE);
   auto positions = ib_vector_create(heap_alloc, sizeof(doc_id_t), 32);
 
   while ((err = cursor.fetch(dtuple)) == DB_SUCCESS) {
@@ -1493,15 +1505,23 @@ dberr_t FTS::init(size_t n_threads) noexcept {
 dberr_t FTS::start_parse_threads(Builder *builder) noexcept {
   auto fn = [&](PSI_thread_seqnum seqnum, Parser *parser, Builder *builder) {
     ut_a(seqnum > 0);
+#ifdef UNIV_PFS_THREAD
     Runnable runnable{fts_parallel_tokenization_thread_key, seqnum};
+#else
+    Runnable runnable{PSI_NOT_INSTRUMENTED, seqnum};
+#endif /* UNIV_PFS_THREAD */
 
-    auto old_thd = current_thd;
+    my_thread_init();
 
-    current_thd = m_ctx.thd();
+    auto thd = create_internal_thd();
+    ut_ad(current_thd == thd);
 
+    thd->push_diagnostics_area(&parser->da, false);
     parser->parse(builder);
+    thd->pop_diagnostics_area();
 
-    current_thd = old_thd;
+    destroy_internal_thd(current_thd);
+    my_thread_end();
   };
 
   size_t seqnum{1};
@@ -1526,6 +1546,15 @@ dberr_t FTS::enqueue(FTS::Doc_item *doc_item) noexcept {
 
 dberr_t FTS::check_for_errors() noexcept {
   for (auto parser : m_parsers) {
+    auto da = &parser->da;
+    if (da->is_error() && !m_ctx.thd()->is_error()) {
+      m_ctx.thd()->get_stmt_da()->set_error_status(
+          da->mysql_errno(), da->message_text(), da->returned_sqlstate());
+    }
+    m_ctx.thd()->get_stmt_da()->copy_sql_conditions_from_da(m_ctx.thd(),
+                                                            &parser->da);
+  }
+  for (auto parser : m_parsers) {
     auto err = parser->get_error();
 
     if (err != DB_SUCCESS) {
@@ -1546,7 +1575,11 @@ dberr_t FTS::insert(Builder *builder) noexcept {
   auto fn = [&](PSI_thread_seqnum seqnum, FTS::Inserter::Handler *handler,
                 dberr_t &err) {
     ut_a(seqnum > 0);
+#ifdef UNIV_PFS_THREAD
     Runnable runnable{fts_parallel_merge_thread_key, seqnum};
+#else
+    Runnable runnable{PSI_NOT_INSTRUMENTED, seqnum};
+#endif /* UNIV_PFS_THREAD */
 
     if (!handler->m_files.empty()) {
       err = m_inserter->insert(builder, handler);
@@ -1652,7 +1685,7 @@ dberr_t FTS::scan_finished(dberr_t err) noexcept {
         auto name = m_ctx.m_old_table->name.m_name;
         const auto max_doc_id{fts.m_doc_id->max_doc_id()};
 
-        fts_update_next_doc_id(0, m_ctx.m_new_table, name, max_doc_id);
+        fts_update_next_doc_id(nullptr, m_ctx.m_new_table, name, max_doc_id);
       }
     }
   }

@@ -1,7 +1,7 @@
 #ifndef UNITTEST_GUNIT_FAKE_INTEGER_ITERATOR_H_
 #define UNITTEST_GUNIT_FAKE_INTEGER_ITERATOR_H_
 
-/* Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA  */
 
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -41,10 +42,10 @@
 class FakeIntegerIterator final : public TableRowIterator {
  public:
   FakeIntegerIterator(THD *thd, TABLE *table, Field_long *field,
-                      std::vector<int> dataset)
+                      std::vector<std::optional<int>> dataset)
       : TableRowIterator(thd, table),
         m_field(field),
-        m_dataset(move(dataset)) {}
+        m_dataset(std::move(dataset)) {}
 
   bool Init() override {
     m_current_index = 0;
@@ -57,7 +58,14 @@ class FakeIntegerIterator final : public TableRowIterator {
       return -1;
     }
 
-    m_field->store(m_dataset[m_current_index++], /* is_unsigned */ false);
+    const std::optional<int> value = m_dataset[m_current_index++];
+    if (value.has_value()) {
+      m_field->store(*value, /*unsigned_val=*/false);
+      m_field->set_notnull();
+    } else {
+      m_field->set_null();
+    }
+
     return 0;
   }
 
@@ -67,7 +75,7 @@ class FakeIntegerIterator final : public TableRowIterator {
   size_t m_current_index{0};
   int m_num_read_calls{0};
   Field_long *m_field;
-  std::vector<int> m_dataset;
+  std::vector<std::optional<int>> m_dataset;
 };
 
 #endif  // UNITTEST_GUNIT_FAKE_INTEGER_ITERATOR_H_

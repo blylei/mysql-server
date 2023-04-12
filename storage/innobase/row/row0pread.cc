@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -132,7 +132,7 @@ void Parallel_reader::Scan_ctx::index_s_lock() {
   if (m_s_locks.fetch_add(1, std::memory_order_acquire) == 0) {
     auto index = m_config.m_index;
     /* The latch can be unlocked by a thread that didn't originally lock it. */
-    rw_lock_s_lock_gen(dict_index_get_lock(index), true);
+    rw_lock_s_lock_gen(dict_index_get_lock(index), true, UT_LOCATION_HERE);
   }
 }
 
@@ -228,7 +228,7 @@ class PCursor {
   void restore_position() noexcept {
     constexpr auto MODE = BTR_SEARCH_LEAF;
     const auto relative = m_pcur->m_rel_pos;
-    auto equal = m_pcur->restore_position(MODE, m_mtr, __FILE__, __LINE__);
+    auto equal = m_pcur->restore_position(MODE, m_mtr, UT_LOCATION_HERE);
 
 #ifdef UNIV_DEBUG
     if (m_pcur->m_pos_state == BTR_PCUR_IS_POSITIONED_OPTIMISTIC) {
@@ -300,6 +300,9 @@ class PCursor {
     return m_pcur->is_after_last_on_page();
   }
 
+  /** @return Level where the cursor is intended. */
+  size_t read_level() const noexcept { return m_read_level; }
+
  private:
   /** Mini-transaction. */
   mtr_t *m_mtr{};
@@ -313,12 +316,13 @@ class PCursor {
 };
 
 buf_block_t *Parallel_reader::Scan_ctx::block_get_s_latched(
-    const page_id_t &page_id, mtr_t *mtr, int line) const {
+    const page_id_t &page_id, mtr_t *mtr, size_t line) const {
   /* We never scan undo tablespaces. */
   ut_a(!fsp_is_undo_tablespace(page_id.space()));
 
-  auto block = buf_page_get_gen(page_id, m_config.m_page_size, RW_S_LATCH,
-                                nullptr, Page_fetch::SCAN, __FILE__, line, mtr);
+  auto block =
+      buf_page_get_gen(page_id, m_config.m_page_size, RW_S_LATCH, nullptr,
+                       Page_fetch::SCAN, {__FILE__, line}, mtr);
 
   buf_block_dbg_add_level(block, SYNC_TREE_NODE);
 
@@ -362,18 +366,33 @@ dberr_t PCursor::move_to_user_rec() noexcept {
   auto block = page_cur_get_block(cur);
   const auto &page_id = block->page.id;
 
+  DEBUG_SYNC_C("parallel_reader_next_block");
+
   /* We never scan undo tablespaces. */
   ut_a(!fsp_is_undo_tablespace(page_id.space()));
 
-  block = buf_page_get_gen(page_id_t(page_id.space(), next_page_no),
-                           block->page.size, RW_S_LATCH, nullptr,
-                           Page_fetch::SCAN, __FILE__, __LINE__, m_mtr);
+  if (m_read_level == 0) {
+    block = buf_page_get_gen(page_id_t(page_id.space(), next_page_no),
+                             block->page.size, RW_S_LATCH, nullptr,
+                             Page_fetch::SCAN, UT_LOCATION_HERE, m_mtr);
+  } else {
+    /* Read IO should be waited for. But s-latch should be nowait,
+    to avoid deadlock opportunity completely. */
+    block = buf_page_get_gen(page_id_t(page_id.space(), next_page_no),
+                             block->page.size, RW_NO_LATCH, nullptr,
+                             Page_fetch::SCAN, UT_LOCATION_HERE, m_mtr);
+    bool success = buf_page_get_known_nowait(
+        RW_S_LATCH, block, Cache_hint::KEEP_OLD, __FILE__, __LINE__, m_mtr);
+    btr_leaf_page_release(block, RW_NO_LATCH, m_mtr);
+
+    if (!success) {
+      return DB_LOCK_NOWAIT;
+    }
+  }
 
   buf_block_dbg_add_level(block, SYNC_TREE_NODE);
 
-  if (page_is_leaf(buf_block_get_frame(block))) {
-    btr_leaf_page_release(page_cur_get_block(cur), RW_S_LATCH, m_mtr);
-  }
+  btr_leaf_page_release(page_cur_get_block(cur), RW_S_LATCH, m_mtr);
 
   page_cur_set_before_first(block, cur);
 
@@ -392,6 +411,8 @@ dberr_t PCursor::restore_from_savepoint() noexcept {
 }
 
 dberr_t Parallel_reader::Thread_ctx::restore_from_savepoint() noexcept {
+  /* If read_level != 0, might return DB_LOCK_NOWAIT error. */
+  ut_ad(m_pcursor->read_level() == 0);
   return m_pcursor->restore_from_savepoint();
 }
 
@@ -401,6 +422,7 @@ void Parallel_reader::Thread_ctx::savepoint() noexcept {
 
 dberr_t PCursor::move_to_next_block(dict_index_t *index) {
   ut_ad(m_pcur->is_after_last_on_page());
+  dberr_t err = DB_SUCCESS;
 
   if (rw_lock_get_waiters(dict_index_get_lock(index))) {
     /* There are waiters on the index tree lock. Store and restore
@@ -415,10 +437,29 @@ dberr_t PCursor::move_to_next_block(dict_index_t *index) {
     /* Yield so that another thread can proceed. */
     std::this_thread::yield();
 
-    return restore_from_savepoint();
+    err = restore_from_savepoint();
   } else {
-    return move_to_user_rec();
+    err = move_to_user_rec();
   }
+
+  int n_retries [[maybe_unused]] = 0;
+  while (err == DB_LOCK_NOWAIT) {
+    /* We should restore the cursor from index root page,
+    to avoid deadlock opportunity. */
+    ut_ad(m_read_level != 0);
+
+    savepoint();
+
+    /* Forces to restore from index root. */
+    m_pcur->m_block_when_stored.clear();
+
+    err = restore_from_savepoint();
+
+    n_retries++;
+    ut_ad(n_retries < 10);
+  }
+
+  return err;
 }
 
 bool Parallel_reader::Scan_ctx::check_visibility(const rec_t *&rec,
@@ -471,14 +512,15 @@ bool Parallel_reader::Scan_ctx::check_visibility(const rec_t *&rec,
   }
 
   ut_ad(!m_trx || m_trx->isolation_level == TRX_ISO_READ_UNCOMMITTED ||
-        !rec_offs_any_null_extern(rec, offsets));
+        !rec_offs_any_null_extern(m_config.m_index, rec, offsets));
 
   return (true);
 }
 
 void Parallel_reader::Scan_ctx::copy_row(const rec_t *rec, Iter *iter) const {
-  iter->m_offsets = rec_get_offsets(rec, m_config.m_index, nullptr,
-                                    ULINT_UNDEFINED, &iter->m_heap);
+  iter->m_offsets =
+      rec_get_offsets(rec, m_config.m_index, nullptr, ULINT_UNDEFINED,
+                      UT_LOCATION_HERE, &iter->m_heap);
 
   /* Copy the row from the page to the scan iterator. The copy should use
   memory from the iterator heap because the scan iterator owns the copy. */
@@ -511,7 +553,8 @@ Parallel_reader::Scan_ctx::create_persistent_cursor(
 
   std::shared_ptr<Iter> iter = std::make_shared<Iter>();
 
-  iter->m_heap = mem_heap_create(sizeof(btr_pcur_t) + (srv_page_size / 16));
+  iter->m_heap = mem_heap_create(sizeof(btr_pcur_t) + (srv_page_size / 16),
+                                 UT_LOCATION_HERE);
 
   auto rec = page_cursor.rec;
 
@@ -542,8 +585,8 @@ Parallel_reader::Scan_ctx::create_persistent_cursor(
   iter->m_pcur->open_on_user_rec(page_cursor, PAGE_CUR_GE,
                                  BTR_ALREADY_S_LATCHED | BTR_SEARCH_LEAF);
 
-  ut_ad(btr_page_get_level(buf_block_get_frame(iter->m_pcur->get_block()),
-                           mtr) == m_config.m_read_level);
+  ut_ad(btr_page_get_level(buf_block_get_frame(iter->m_pcur->get_block())) ==
+        m_config.m_read_level);
 
   iter->m_pcur->store_position(mtr);
   iter->m_pcur->set_fetch_type(Page_fetch::SCAN);
@@ -604,7 +647,7 @@ dberr_t Parallel_reader::Ctx::traverse() {
 
 dberr_t Parallel_reader::Ctx::traverse_recs(PCursor *pcursor, mtr_t *mtr) {
   const auto &end_tuple = m_range.second->m_tuple;
-  auto heap = mem_heap_create(srv_page_size / 4);
+  auto heap = mem_heap_create(srv_page_size / 4, UT_LOCATION_HERE);
   auto index = m_scan_ctx->m_config.m_index;
 
   m_start = true;
@@ -672,7 +715,8 @@ dberr_t Parallel_reader::Ctx::traverse_recs(PCursor *pcursor, mtr_t *mtr) {
     rec_offs_init(offsets_);
 
     const rec_t *rec = page_cur_get_rec(cur);
-    offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED, &heap);
+    offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED,
+                              UT_LOCATION_HERE, &heap);
 
     if (end_tuple != nullptr) {
       ut_ad(rec != nullptr);
@@ -912,7 +956,8 @@ page_no_t Parallel_reader::Scan_ctx::search(const buf_block_t *block,
 
   rec_offs_init(offsets_);
 
-  offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED, &heap);
+  offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED,
+                            UT_LOCATION_HERE, &heap);
 
   auto page_no = btr_node_ptr_get_child_page_no(rec, offsets);
 
@@ -938,7 +983,7 @@ page_cur_t Parallel_reader::Scan_ctx::start_range(
 
     auto block = block_get_s_latched(page_id, mtr, __LINE__);
 
-    height = btr_page_get_level(buf_block_get_frame(block), mtr);
+    height = btr_page_get_level(buf_block_get_frame(block));
 
     savepoints.push_back({savepoint, block});
 
@@ -1004,7 +1049,7 @@ dberr_t Parallel_reader::Scan_ctx::create_ranges(const Scan_range &scan_range,
 
   /* read_level requested should be less than the tree height. */
   ut_ad(m_config.m_read_level <
-        btr_page_get_level(buf_block_get_frame(block), mtr) + 1);
+        btr_page_get_level(buf_block_get_frame(block)) + 1);
 
   savepoint.second = block;
 
@@ -1036,7 +1081,7 @@ dberr_t Parallel_reader::Scan_ctx::create_ranges(const Scan_range &scan_range,
   mem_heap_t *heap{};
 
   const auto at_leaf = page_is_leaf(buf_block_get_frame(block));
-  const auto at_level = btr_page_get_level(buf_block_get_frame(block), mtr);
+  const auto at_level = btr_page_get_level(buf_block_get_frame(block));
 
   Savepoints savepoints{};
 
@@ -1047,10 +1092,11 @@ dberr_t Parallel_reader::Scan_ctx::create_ranges(const Scan_range &scan_range,
          !dict_table_is_comp(index->table));
 
     if (heap == nullptr) {
-      heap = mem_heap_create(srv_page_size / 4);
+      heap = mem_heap_create(srv_page_size / 4, UT_LOCATION_HERE);
     }
 
-    offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED, &heap);
+    offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED,
+                              UT_LOCATION_HERE, &heap);
 
     const auto end = scan_range.m_end;
 
@@ -1153,7 +1199,8 @@ dberr_t Parallel_reader::Scan_ctx::partition(
 
     ut_a(iter->m_heap == nullptr);
 
-    iter->m_heap = mem_heap_create(sizeof(btr_pcur_t) + (srv_page_size / 16));
+    iter->m_heap = mem_heap_create(sizeof(btr_pcur_t) + (srv_page_size / 16),
+                                   UT_LOCATION_HERE);
 
     iter->m_tuple = dtuple_copy(scan_range.m_end, iter->m_heap);
 

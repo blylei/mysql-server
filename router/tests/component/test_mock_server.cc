@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "exit_status.h"
 #include "mysqlrouter/mysql_session.h"
 #include "mysqlxclient.h"
 #include "mysqlxclient/xerror.h"
@@ -87,13 +88,9 @@ class MockServerCLITest
       public ::testing::WithParamInterface<MockServerCLITestParam> {};
 
 TEST_P(MockServerCLITest, check) {
-  auto mysql_server_mock_path = get_mysqlserver_mock_exec().str();
-
-  ASSERT_THAT(mysql_server_mock_path, ::testing::StrNe(""));
-
   SCOPED_TRACE("// start binary");
-  auto &cmd = launch_command(mysql_server_mock_path, GetParam().cmdline_args,
-                             GetParam().expected_exit_code, true);
+  auto &cmd = launch_mysql_server_mock(GetParam().cmdline_args, 0 /* = port */,
+                                       GetParam().expected_exit_code, -1s);
 
   SCOPED_TRACE("// wait for exit");
   check_exit_code(cmd, GetParam().expected_exit_code, 5s);
@@ -230,9 +227,9 @@ const MockServerCLITestParam mock_server_cli_test_param[] = {
      }},
 };
 
-INSTANTIATE_TEST_CASE_P(Spec, MockServerCLITest,
-                        ::testing::ValuesIn(mock_server_cli_test_param),
-                        [](const auto &info) { return info.param.test_name; });
+INSTANTIATE_TEST_SUITE_P(Spec, MockServerCLITest,
+                         ::testing::ValuesIn(mock_server_cli_test_param),
+                         [](const auto &info) { return info.param.test_name; });
 
 class MockServerCLITestBase : public RouterComponentTest {};
 
@@ -255,7 +252,7 @@ TEST_F(MockServerCLITestBase, classic_many_connections) {
   }
 
   SCOPED_TRACE("// start " + mysql_server_mock_path);
-  spawner(mysql_server_mock_path).spawn(cmdline_args);
+  spawner(mysql_server_mock_path).with_core_dump(true).spawn(cmdline_args);
 
   // Opening a new connection takes ~12ms on a dev-machine.
   //
@@ -382,9 +379,7 @@ static void x_protocol_connect_ok(const std::string &host, uint16_t port,
 }
 
 TEST_P(MockServerConnectOkTest, classic_protocol) {
-  auto mysql_server_mock_path = get_mysqlserver_mock_exec().str();
   auto bind_port = port_pool_.get_next_available();
-  ASSERT_THAT(mysql_server_mock_path, ::testing::StrNe(""));
 
   std::map<std::string, std::string> config{
       {"http_port", std::to_string(port_pool_.get_next_available())},
@@ -407,17 +402,15 @@ TEST_P(MockServerConnectOkTest, classic_protocol) {
   cmdline_args.push_back(std::to_string(bind_port));
 
   SCOPED_TRACE("// start binary");
-  launch_command(mysql_server_mock_path, cmdline_args, EXIT_SUCCESS, true, 1s);
+  launch_mysql_server_mock(cmdline_args, bind_port);
 
   SCOPED_TRACE("// checking "s + GetParam().test_name);
   classic_protocol_connect_ok(config.at("hostname"), bind_port);
 }
 
 TEST_P(MockServerConnectOkTest, x_protocol) {
-  auto mysql_server_mock_path = get_mysqlserver_mock_exec().str();
   auto bind_port = port_pool_.get_next_available();
   auto other_bind_port = port_pool_.get_next_available();
-  ASSERT_THAT(mysql_server_mock_path, ::testing::StrNe(""));
 
   std::map<std::string, std::string> config{
       {"http_port", std::to_string(port_pool_.get_next_available())},
@@ -426,7 +419,8 @@ TEST_P(MockServerConnectOkTest, x_protocol) {
       {"hostname", "127.0.0.1"},
   };
 
-  std::vector<std::string> cmdline_args;
+  std::vector<std::string> cmdline_args{"--logging-folder",
+                                        get_test_temp_dir_name()};
 
   for (const auto &arg : GetParam().cmdline_args) {
     if (arg.empty()) {
@@ -446,7 +440,7 @@ TEST_P(MockServerConnectOkTest, x_protocol) {
   cmdline_args.push_back(std::to_string(bind_port));
 
   SCOPED_TRACE("// start binary");
-  launch_command(mysql_server_mock_path, cmdline_args, EXIT_SUCCESS, true, 1s);
+  launch_mysql_server_mock(cmdline_args, other_bind_port);
 
   SCOPED_TRACE("// checking "s + GetParam().test_name);
   x_protocol_connect_ok(config.at("hostname"), bind_port);
@@ -563,9 +557,9 @@ const MockServerConnectOkTestParam mock_server_connect_ok_test_param[] = {
      }},
 };
 
-INSTANTIATE_TEST_CASE_P(Spec, MockServerConnectOkTest,
-                        ::testing::ValuesIn(mock_server_connect_ok_test_param),
-                        [](const auto &info) { return info.param.test_name; });
+INSTANTIATE_TEST_SUITE_P(Spec, MockServerConnectOkTest,
+                         ::testing::ValuesIn(mock_server_connect_ok_test_param),
+                         [](const auto &info) { return info.param.test_name; });
 
 // custom connect tests
 
@@ -582,20 +576,18 @@ class MockServerConnectTest
       public ::testing::WithParamInterface<MockServerConnectTestParam> {};
 
 TEST_P(MockServerConnectTest, check) {
-  auto mysql_server_mock_path = get_mysqlserver_mock_exec().str();
-
-  ASSERT_THAT(mysql_server_mock_path, ::testing::StrNe(""));
-
+  auto classic_port = port_pool_.get_next_available();
   std::map<std::string, std::string> config{
       {"http_port", std::to_string(port_pool_.get_next_available())},
-      {"port", std::to_string(port_pool_.get_next_available())},
+      {"port", std::to_string(classic_port)},
       {"xport", std::to_string(port_pool_.get_next_available())},
       {"datadir", get_data_dir().str()},
       {"certdir", SSL_TEST_DATA_DIR},
       {"hostname", "127.0.0.1"},
   };
 
-  std::vector<std::string> cmdline_args;
+  std::vector<std::string> cmdline_args{"--logging-folder",
+                                        get_test_temp_dir_name()};
 
   for (const auto &arg : GetParam().cmdline_args) {
     if (arg.empty()) {
@@ -606,7 +598,7 @@ TEST_P(MockServerConnectTest, check) {
   }
 
   SCOPED_TRACE("// start binary");
-  launch_command(mysql_server_mock_path, cmdline_args, EXIT_SUCCESS, true, 1s);
+  launch_mysql_server_mock(cmdline_args, classic_port);
 
   SCOPED_TRACE("// checking "s + GetParam().test_name);
   GetParam().checker(config);
@@ -1007,6 +999,7 @@ const MockServerConnectTestParam mock_server_connect_test_param[] = {
      {
          "--filename", "@datadir@/tls_endpoint.js",      //
          "--module-prefix", "@datadir@",                 //
+         "--port", "@port@",                             //
          "--xport", "@xport@",                           //
          "--ssl-mode", "required",                       //
          "--ssl-ca", "@certdir@/crl-ca-cert.pem",        //
@@ -1057,9 +1050,105 @@ const MockServerConnectTestParam mock_server_connect_test_param[] = {
      }},
 };
 
-INSTANTIATE_TEST_CASE_P(Spec, MockServerConnectTest,
-                        ::testing::ValuesIn(mock_server_connect_test_param),
-                        [](const auto &info) { return info.param.test_name; });
+INSTANTIATE_TEST_SUITE_P(Spec, MockServerConnectTest,
+                         ::testing::ValuesIn(mock_server_connect_test_param),
+                         [](const auto &info) { return info.param.test_name; });
+
+// --core-file
+
+struct MockServerCoreTestParam {
+  const char *test_name;
+
+  std::vector<std::string> cmdline_args;
+
+  ExitStatus expected_exit_status_;
+};
+
+class MockServerCoreTest
+    : public RouterComponentTest,
+      public ::testing::WithParamInterface<MockServerCoreTestParam> {};
+
+TEST_P(MockServerCoreTest, check) {
+  auto mysql_server_mock_path = get_mysqlserver_mock_exec().str();
+
+  ASSERT_THAT(mysql_server_mock_path, ::testing::StrNe(""));
+
+  std::map<std::string, std::string> config{
+      {"http_port", std::to_string(port_pool_.get_next_available())},
+      {"port", std::to_string(port_pool_.get_next_available())},
+      {"xport", std::to_string(port_pool_.get_next_available())},
+      {"datadir", get_data_dir().str()},
+      {"certdir", SSL_TEST_DATA_DIR},
+      {"hostname", "127.0.0.1"},
+  };
+
+  std::vector<std::string> cmdline_args{"--logging-folder",
+                                        get_test_temp_dir_name()};
+
+  for (const auto &arg : GetParam().cmdline_args) {
+    if (arg.empty()) {
+      cmdline_args.push_back(arg);
+    } else {
+      cmdline_args.push_back(replace_placeholders(arg, config));
+    }
+  }
+
+  bool wait_for_ready =
+      GetParam().expected_exit_status_ == ExitStatus{EXIT_SUCCESS};
+
+  SCOPED_TRACE("// start binary");
+  auto &proc = spawner(mysql_server_mock_path)
+                   .expected_exit_code(GetParam().expected_exit_status_)
+                   .wait_for_notify_ready(wait_for_ready ? 1s : -1s)
+                   .spawn(cmdline_args);
+
+  if (!wait_for_ready) {
+    EXPECT_NO_THROW(proc.native_wait_for_exit());
+
+    EXPECT_THAT(proc.get_full_output(),
+                ::testing::HasSubstr("Value for parameter '--core-file' "
+                                     "needs to be one of: ['0', '1']"));
+  }
+}
+
+const MockServerCoreTestParam mock_server_core_test_param[] = {
+    {"core_file_no_arg",
+     {
+         "--filename", "@datadir@/mock_server_require_password.js",  //
+         "--module-prefix", "@datadir@",                             //
+         "--port", "@port@",                                         //
+         "--core-file",                                              //
+     },
+     ExitStatus{EXIT_SUCCESS}},
+    {"core_file_0",
+     {
+         "--filename", "@datadir@/mock_server_require_password.js",  //
+         "--module-prefix", "@datadir@",                             //
+         "--port", "@port@",                                         //
+         "--core-file", "0",                                         //
+     },
+     ExitStatus{EXIT_SUCCESS}},
+    {"core_file_1",
+     {
+         "--filename", "@datadir@/mock_server_require_password.js",  //
+         "--module-prefix", "@datadir@",                             //
+         "--port", "@port@",                                         //
+         "--core-file", "1",                                         //
+     },
+     ExitStatus{EXIT_SUCCESS}},
+    {"core_file_invalid",
+     {
+         "--filename", "@datadir@/mock_server_require_password.js",  //
+         "--module-prefix", "@datadir@",                             //
+         "--port", "@port@",                                         //
+         "--core-file", "abc",                                       //
+     },
+     ExitStatus{EXIT_FAILURE}},
+};
+
+INSTANTIATE_TEST_SUITE_P(Spec, MockServerCoreTest,
+                         ::testing::ValuesIn(mock_server_core_test_param),
+                         [](const auto &info) { return info.param.test_name; });
 
 int main(int argc, char *argv[]) {
   net::impl::socket::init();

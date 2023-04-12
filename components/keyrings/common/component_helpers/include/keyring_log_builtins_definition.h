@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,11 +56,6 @@ class Log_builtins_keyring {
   }
   static DEFINE_METHOD(bool, item_numeric_class, (log_item_class)) {
     return false;
-  }
-
-  static DEFINE_METHOD(log_item_data *, line_item_set_with_key,
-                       (log_line *, log_item_type, const char *, uint32)) {
-    return nullptr;
   }
 
   static DEFINE_METHOD(log_item_data *, item_set_with_key,
@@ -138,6 +133,9 @@ class Log_builtins_keyring {
 
   /* ================ REQUIRED ================ */
   /* log_builtins */
+  static DEFINE_METHOD(log_item_data *, line_item_set_with_key,
+                       (log_line * ll, log_item_type t, const char *key,
+                        uint32 alloc));
   static DEFINE_METHOD(log_item_data *, line_item_set,
                        (log_line * ll, log_item_type t));
   static DEFINE_METHOD(log_line *, line_init, ());

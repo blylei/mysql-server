@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2004, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2004, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -58,12 +58,12 @@
 #include "my_psi_config.h"
 #include "my_sys.h"
 #include "my_time.h"
+#include "mysql/components/services/bits/mysql_mutex_bits.h"
 #include "mysql/components/services/bits/psi_bits.h"
+#include "mysql/components/services/bits/psi_memory_bits.h"
+#include "mysql/components/services/bits/psi_mutex_bits.h"
 #include "mysql/components/services/log_builtins.h"
 #include "mysql/components/services/log_shared.h"
-#include "mysql/components/services/mysql_mutex_bits.h"
-#include "mysql/components/services/psi_memory_bits.h"
-#include "mysql/components/services/psi_mutex_bits.h"
 #include "mysql/psi/mysql_file.h"
 #include "mysql/psi/mysql_memory.h"
 #include "mysql/psi/mysql_mutex.h"
@@ -88,7 +88,7 @@
 #include "sql/sql_base.h"   // close_trans_system_tables
 #include "sql/sql_class.h"  // THD
 #include "sql/sql_time.h"   // localtime_to_TIME
-#include "sql/table.h"      // TABLE_LIST
+#include "sql/table.h"      // Table_ref
 #include "sql_string.h"     // String
 
 #include <algorithm>
@@ -268,7 +268,7 @@ static const TRAN_TYPE_INFO *find_transition_type(my_time_t t,
 
   SYNOPSIS
     gmt_sec_to_TIME()
-      tmp          - pointer to structure for broken down represenatation
+      tmp          - pointer to structure for broken down representation
       sec_in_utc   - my_time_t value to be converted
       sp           - pointer to struct with time zone description
 
@@ -279,7 +279,7 @@ static const TRAN_TYPE_INFO *find_transition_type(my_time_t t,
     (60th and 61st second, look how we calculate them as "hit" in this
     function).
     Under realistic assumptions about frequency of transitions the same array
-    can be used fot MYSQL_TIME -> my_time_t conversion. For this we need to
+    can be used for MYSQL_TIME -> my_time_t conversion. For this we need to
     implement tweaked binary search which will take into account that some
     MYSQL_TIME has two matching my_time_t ranges and some of them have none.
 */
@@ -333,7 +333,7 @@ static void gmt_sec_to_TIME(MYSQL_TIME *tmp, my_time_t sec_in_utc,
 
 /*
   Converts local time in broken down representation to local
-  time zone analog of my_time_t represenation.
+  time zone analog of my_time_t representation.
 
   SYNOPSIS
     sec_since_epoch()
@@ -416,7 +416,7 @@ static my_time_t sec_since_epoch(const MYSQL_TIME &mt) {
     - By default it doesn't support un-normalized input. But if
       sec_since_epoch() function supports un-normalized dates
       then this function should handle un-normalized input right,
-      altough it won't normalize structure TIME.
+      although it won't normalize structure TIME.
 
     Traditional approach to problem of conversion from broken down
     representation to time_t is iterative. Both elsie's and glibc
@@ -432,7 +432,7 @@ static my_time_t sec_since_epoch(const MYSQL_TIME &mt) {
     and we have two possible answers).
 
     We use completely different approach. It is better since it is both
-    faster than iterative implementations and fully determenistic. If you
+    faster than iterative implementations and fully deterministic. If you
     look at my_time_t to MYSQL_TIME conversion then you'll find that it consist
     of two steps:
     The first is calculating shifted my_time_t value and the second - TIME
@@ -441,7 +441,7 @@ static my_time_t sec_since_epoch(const MYSQL_TIME &mt) {
     my_time_t conversion. It is piecewise linear function which is defined
     by combination of transition times as break points and times offset
     as changing function parameter. The possible inverse function for this
-    converison would be ambiguos but with MySQL's restrictions we can use
+    conversion would be ambiguous but with MySQL's restrictions we can use
     some function which is the same as inverse function on unambigiuos
     ranges and coincides with one of branches of inverse function in
     other ranges. Thus we just need to build table which will determine
@@ -639,7 +639,7 @@ bool convert_time_zone_displacement(const Time_zone *tz, MYSQL_TIME *mt) {
   were no explicit time zone specified. On the other hand because of this
   conversion methods provided by this class is significantly slower and
   possibly less multi-threaded-friendly than corresponding Time_zone_db
-  methods so the latter should be preffered there it is possible.
+  methods so the latter should be preferred there it is possible.
 */
 class Time_zone_system : public Time_zone {
  public:
@@ -788,7 +788,7 @@ my_time_t Time_zone_utc::TIME_to_gmt_sec(const MYSQL_TIME *mt,
       t   - my_time_t value to be converted
 
   NOTE
-    See note for apropriate Time_zone_system method.
+    See note for appropriate Time_zone_system method.
 */
 void Time_zone_utc::gmt_sec_to_TIME(MYSQL_TIME *tmp, my_time_t t) const {
   struct tm tmp_tm;
@@ -1064,7 +1064,7 @@ static mysql_mutex_t tz_LOCK;
 static bool tz_inited = false;
 
 /*
-  This two static variables are inteded for holding info about leap seconds
+  These two static variables are intended for holding info about leap seconds
   shared by all time zones.
 */
 static uint tz_leapcnt = 0;
@@ -1104,16 +1104,16 @@ class Tz_names_entry {
   SYNOPSIS
     tz_init_table_list()
       tz_tabs         - pointer to preallocated array of MY_TZ_TABLES_COUNT
-                        TABLE_LIST objects
+                        Table_ref objects
 
   DESCRIPTION
-    This function prepares list of TABLE_LIST objects which can be used
+    This function prepares list of Table_ref objects which can be used
     for opening of time zone tables from preallocated array.
 */
 
-static void tz_init_table_list(TABLE_LIST *tz_tabs) {
+static void tz_init_table_list(Table_ref *tz_tabs) {
   for (int i = 0; i < MY_TZ_TABLES_COUNT; i++) {
-    new (&tz_tabs[i]) TABLE_LIST;
+    new (&tz_tabs[i]) Table_ref;
     tz_tabs[i].alias = tz_tabs[i].table_name = tz_tables_names[i].str;
     tz_tabs[i].table_name_length = tz_tables_names[i].length;
     tz_tabs[i].db = tz_tables_db_name.str;
@@ -1184,7 +1184,7 @@ static void init_tz_psi_keys(void) {
 */
 bool my_tz_init(THD *org_thd, const char *default_tzname, bool bootstrap) {
   THD *thd;
-  TABLE_LIST tz_tables[1 + MY_TZ_TABLES_COUNT];
+  Table_ref tz_tables[1 + MY_TZ_TABLES_COUNT];
   TABLE *table;
   Tz_names_entry *tmp_tzname;
   bool return_val = true;
@@ -1204,7 +1204,7 @@ bool my_tz_init(THD *org_thd, const char *default_tzname, bool bootstrap) {
   thd->store_globals();
 
   /* Init all memory structures that require explicit destruction */
-  init_sql_alloc(key_memory_tz_storage, &tz_storage, 32 * 1024, 0);
+  init_sql_alloc(key_memory_tz_storage, &tz_storage, 32 * 1024);
   mysql_mutex_init(key_tz_LOCK, &tz_LOCK, MY_MUTEX_INIT_FAST);
   tz_inited = true;
 
@@ -1252,7 +1252,7 @@ bool my_tz_init(THD *org_thd, const char *default_tzname, bool bootstrap) {
     goto end_with_setting_default_tz;
   }
 
-  for (TABLE_LIST *tl = tz_tables; tl; tl = tl->next_global) {
+  for (Table_ref *tl = tz_tables; tl; tl = tl->next_global) {
     /* Force close at the end of the function to free memory. */
     tl->table->invalidate_dict();
   }
@@ -1385,7 +1385,7 @@ void my_tz_free() {
 */
 
 static Time_zone *tz_load_from_open_tables(const String *tz_name,
-                                           TABLE_LIST *tz_tables) {
+                                           Table_ref *tz_tables) {
   TABLE *table = nullptr;
   TIME_ZONE_INFO *tz_info = nullptr;
   Tz_names_entry *tmp_tzname;
@@ -1590,7 +1590,7 @@ static Time_zone *tz_load_from_open_tables(const String *tz_name,
 
   /*
     We have to allow HA_ERR_KEY_NOT_FOUND because some time zones
-    for example UTC have no transitons.
+    for example UTC have no transitions.
   */
   if (res != HA_ERR_END_OF_FILE && res != HA_ERR_KEY_NOT_FOUND) {
     assert(res != HA_ERR_LOCK_WAIT_TIMEOUT && res != HA_ERR_LOCK_DEADLOCK);
@@ -1834,7 +1834,7 @@ Time_zone *my_tz_find(THD *thd, const String *name) {
     if (it != tz_names.end())
       return it->second->tz;
     else if (time_zone_tables_exist) {
-      TABLE_LIST tz_tables[MY_TZ_TABLES_COUNT];
+      Table_ref tz_tables[MY_TZ_TABLES_COUNT];
 
       tz_init_table_list(tz_tables);
       init_mdl_requests(tz_tables);

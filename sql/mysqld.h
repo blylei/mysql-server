@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2010, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -48,17 +48,17 @@
 #include "my_sqlcommand.h"  // SQLCOM_END
 #include "my_sys.h"         // MY_TMPDIR
 #include "my_thread.h"      // my_thread_attr_t
-#include "mysql/components/services/mysql_cond_bits.h"
-#include "mysql/components/services/mysql_mutex_bits.h"
-#include "mysql/components/services/mysql_rwlock_bits.h"
-#include "mysql/components/services/psi_cond_bits.h"
-#include "mysql/components/services/psi_file_bits.h"
-#include "mysql/components/services/psi_mutex_bits.h"
-#include "mysql/components/services/psi_rwlock_bits.h"
-#include "mysql/components/services/psi_socket_bits.h"
-#include "mysql/components/services/psi_stage_bits.h"
-#include "mysql/components/services/psi_statement_bits.h"
-#include "mysql/components/services/psi_thread_bits.h"
+#include "mysql/components/services/bits/mysql_cond_bits.h"
+#include "mysql/components/services/bits/mysql_mutex_bits.h"
+#include "mysql/components/services/bits/mysql_rwlock_bits.h"
+#include "mysql/components/services/bits/psi_cond_bits.h"
+#include "mysql/components/services/bits/psi_file_bits.h"
+#include "mysql/components/services/bits/psi_mutex_bits.h"
+#include "mysql/components/services/bits/psi_rwlock_bits.h"
+#include "mysql/components/services/bits/psi_socket_bits.h"
+#include "mysql/components/services/bits/psi_stage_bits.h"
+#include "mysql/components/services/bits/psi_statement_bits.h"
+#include "mysql/components/services/bits/psi_thread_bits.h"
 #include "mysql/status_var.h"
 #include "mysql_com.h"  // SERVER_VERSION_LENGTH
 #ifdef _WIN32
@@ -128,15 +128,16 @@ extern bool dynamic_plugins_are_initialized;
 bool signal_restart_server();
 void kill_mysql(void);
 void refresh_status();
+void reset_status_by_thd();
 bool is_secure_file_path(const char *path);
 ulong sql_rnd_with_mutex();
 
 struct System_status_var *get_thd_status_var(THD *thd, bool *aggregated);
 
 #ifndef NDEBUG
-bool thd_mem_cnt_alloc(THD *thd, size_t size, const char *key_name);
+void thd_mem_cnt_alloc(THD *thd, size_t size, const char *key_name);
 #else
-bool thd_mem_cnt_alloc(THD *thd, size_t size);
+void thd_mem_cnt_alloc(THD *thd, size_t size);
 #endif
 
 void thd_mem_cnt_free(THD *thd, size_t size);
@@ -157,7 +158,7 @@ extern CHARSET_INFO *character_set_filesystem;
 enum enum_server_operational_state {
   SERVER_BOOTING,      /* Server is not operational. It is starting */
   SERVER_OPERATING,    /* Server is fully initialized and operating */
-  SERVER_SHUTTING_DOWN /* erver is shutting down */
+  SERVER_SHUTTING_DOWN /* Server is shutting down */
 };
 enum_server_operational_state get_server_state();
 
@@ -251,6 +252,7 @@ extern bool opt_using_transactions;
 extern ulong current_pid;
 extern ulong expire_logs_days;
 extern ulong binlog_expire_logs_seconds;
+extern bool opt_binlog_expire_logs_auto_purge;
 extern uint sync_binlog_period, sync_relaylog_period, sync_relayloginfo_period,
     sync_masterinfo_period, opt_mta_checkpoint_period, opt_mta_checkpoint_group;
 extern ulong opt_tc_log_size, tc_log_max_pages_used, tc_log_page_size;
@@ -299,6 +301,10 @@ extern char *opt_init_file;
 extern const char *opt_tc_log_file;
 extern char server_uuid[UUID_LENGTH + 1];
 extern const char *server_uuid_ptr;
+#if defined(HAVE_BUILD_ID_SUPPORT)
+extern char server_build_id[42];
+extern const char *server_build_id_ptr;
+#endif
 extern const double log_10[309];
 extern ulong binlog_cache_use, binlog_cache_disk_use;
 extern ulong binlog_stmt_cache_use, binlog_stmt_cache_disk_use;
@@ -833,4 +839,8 @@ extern SERVICE_TYPE(dynamic_loader) * dynamic_loader_srv;
 
 class Deployed_components;
 extern Deployed_components *g_deployed_components;
+
+extern bool opt_persist_sensitive_variables_in_plaintext;
+
+void persisted_variables_refresh_keyring_support();
 #endif /* MYSQLD_INCLUDED */

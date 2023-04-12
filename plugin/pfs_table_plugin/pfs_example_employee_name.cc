@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -38,8 +38,8 @@ Ename_Record ename_records_array[EMPLOYEEE_NAME_MAX_ROWS] = {
 
 /**
   Check for duplicate value of Primary/Unique Key column(s).
-  A sequential search is being used here, but its upto plugin writer to
-  implement his/her own search to make sure duplicate values are not inserted
+  A sequential search is being used here, but it is up to the plugin writer to
+  implement a search of their own to make sure duplicate values are not inserted
   for Primary/Unique Key Column(s).
 
   @param record record to be checked for duplicate
@@ -164,12 +164,12 @@ int ename_index_read(PSI_index_handle *index, PSI_key_reader *reader,
     case 0: {
       Ename_index_by_emp_num *i = (Ename_index_by_emp_num *)index;
       /* Read all keys on index one by one */
-      table_svc->read_key_integer(reader, &i->m_emp_num, find_flag);
+      col_int_svc->read_key(reader, &i->m_emp_num, find_flag);
     } break;
     case 1: {
       Ename_index_by_emp_fname *i = (Ename_index_by_emp_fname *)index;
       /* Read all keys on index one by one */
-      table_svc->read_key_string(reader, &i->m_emp_fname, find_flag);
+      col_string_svc->read_key_string(reader, &i->m_emp_fname, find_flag);
     } break;
     default:
       assert(0);
@@ -226,15 +226,15 @@ int ename_read_column_value(PSI_table_handle *handle, PSI_field *field,
 
   switch (index) {
     case 0: /* EMPLOYEE_NUMBER */
-      table_svc->set_field_integer(field, h->current_row.e_number);
+      col_int_svc->set(field, h->current_row.e_number);
       break;
     case 1: /* FIRST_NAME */
-      table_svc->set_field_char_utf8(field, h->current_row.f_name,
-                                     h->current_row.f_name_length);
+      col_string_svc->set_char_utf8mb4(field, h->current_row.f_name,
+                                       h->current_row.f_name_length);
       break;
     case 2: /* LAST_NAME */
-      table_svc->set_field_varchar_utf8_len(field, h->current_row.l_name,
-                                            h->current_row.l_name_length);
+      col_string_svc->set_varchar_utf8mb4_len(field, h->current_row.l_name,
+                                              h->current_row.l_name_length);
       break;
     default: /* We should never reach here */
       assert(0);
@@ -298,13 +298,13 @@ int ename_write_column_value(PSI_table_handle *handle, PSI_field *field,
 
   switch (index) {
     case 0: /* EMPLOYEE_NUMBER */
-      table_svc->get_field_integer(field, &h->current_row.e_number);
+      col_int_svc->get(field, &h->current_row.e_number);
       break;
     case 1: /* FIRST_NAME */
-      table_svc->get_field_char_utf8(field, (char *)f_name, f_name_length);
+      col_string_svc->get_char_utf8mb4(field, (char *)f_name, f_name_length);
       break;
     case 2: /* LAST_NAME */
-      table_svc->get_field_varchar_utf8(field, (char *)l_name, l_name_length);
+      col_string_svc->get_varchar_utf8mb4(field, (char *)l_name, l_name_length);
       break;
     default: /* We should never reach here */
       assert(0);
@@ -345,13 +345,13 @@ int ename_update_column_value(PSI_table_handle *handle, PSI_field *field,
 
   switch (index) {
     case 0: /* EMPLOYEE_NUMBER */
-      table_svc->get_field_integer(field, &h->current_row.e_number);
+      col_int_svc->get(field, &h->current_row.e_number);
       break;
     case 1: /* FIRST_NAME */
-      table_svc->get_field_char_utf8(field, (char *)f_name, f_name_length);
+      col_string_svc->get_char_utf8mb4(field, (char *)f_name, f_name_length);
       break;
     case 2: /* LAST_NAME */
-      table_svc->get_field_varchar_utf8(field, (char *)l_name, l_name_length);
+      col_string_svc->get_varchar_utf8mb4(field, (char *)l_name, l_name_length);
       break;
     default: /* We should never reach here */
       assert(0);

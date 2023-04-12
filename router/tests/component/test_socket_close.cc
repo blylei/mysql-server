@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021, Oracle and/or its affiliates.
+  Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -61,7 +61,7 @@ class SocketCloseTest : public RouterComponentTest {
   auto &launch_router(const std::string &metadata_cache_section,
                       const std::string &routing_section,
                       const int expected_exitcode,
-                      std::chrono::milliseconds wait_for_notify_ready = 5s) {
+                      std::chrono::milliseconds wait_for_notify_ready = 30s) {
     auto default_section = get_DEFAULT_defaults();
     init_keyring(default_section, get_test_temp_dir_name(), router_user,
                  router_password);
@@ -169,7 +169,7 @@ class SocketCloseTest : public RouterComponentTest {
 
     result += "destinations=";
     for (size_t i = 0; i < destinations.size(); ++i) {
-      result += "127.0.0.1:" + std::to_string(destinations[i]);
+      result += "localhost:" + std::to_string(destinations[i]);
       if (i != destinations.size() - 1) {
         result += ",";
       }
@@ -197,7 +197,7 @@ class SocketCloseTest : public RouterComponentTest {
     router =
         &launch_router(metadata_cache_section,
                        routing_rw_section + routing_ro_section, EXIT_SUCCESS,
-                       /*wait_for_notify_ready=*/5s);
+                       /*wait_for_notify_ready=*/30s);
 
     EXPECT_TRUE(
         wait_for_port_ready(read_only ? router_ro_port : router_rw_port));
@@ -311,13 +311,13 @@ TEST_P(SocketCloseOnMetadataAuthFail, SocketCloseOnMetadataAuthFailTest) {
   auto check_ports_available = [this]() {
     for (const auto port :
          {router_rw_port, router_ro_port, router_rw_x_port, router_ro_x_port}) {
-      EXPECT_TRUE(wait_for_port_available(port));
+      EXPECT_TRUE(wait_for_port_unused(port));
     }
   };
   auto check_ports_not_available = [this]() {
     for (const auto port :
          {router_rw_port, router_ro_port, router_rw_x_port, router_ro_x_port}) {
-      EXPECT_TRUE(wait_for_port_not_available(port));
+      EXPECT_TRUE(wait_for_port_used(port));
     }
   };
 
@@ -405,31 +405,31 @@ TEST_P(SocketCloseOnMetadataUnavailable, 1RW2RO) {
   SCOPED_TRACE("// launch the router with metadata-cache configuration");
   setup_router(GetParam().cluster_type);
   SCOPED_TRACE("// check if both RO and RW ports are used");
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("// Primary node down");
   simulate_cluster_node_down(node_ports, node_http_ports[0]);
-  EXPECT_FALSE(is_port_available(router_rw_port));
-  EXPECT_FALSE(is_port_available(router_ro_port));
-  EXPECT_FALSE(is_port_available(router_rw_x_port));
-  EXPECT_FALSE(is_port_available(router_ro_x_port));
+  EXPECT_FALSE(is_port_bindable(router_rw_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_port));
+  EXPECT_FALSE(is_port_bindable(router_rw_x_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_x_port));
 
   SCOPED_TRACE("// First secondary node down");
   simulate_cluster_node_down(node_ports, node_http_ports[1]);
-  EXPECT_FALSE(is_port_available(router_rw_port));
-  EXPECT_FALSE(is_port_available(router_ro_port));
-  EXPECT_FALSE(is_port_available(router_rw_x_port));
-  EXPECT_FALSE(is_port_available(router_ro_x_port));
+  EXPECT_FALSE(is_port_bindable(router_rw_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_port));
+  EXPECT_FALSE(is_port_bindable(router_rw_x_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_x_port));
 
   SCOPED_TRACE("// Second secondary node down");
   simulate_cluster_node_down(node_ports, node_http_ports[2]);
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
 
   SCOPED_TRACE("// RW and RO queries fail");
   ASSERT_ANY_THROW(
@@ -440,25 +440,25 @@ TEST_P(SocketCloseOnMetadataUnavailable, 1RW2RO) {
   SCOPED_TRACE("// Second secondary node up");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[2]);
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("// Second secondary node down");
   simulate_cluster_node_down(node_ports, node_http_ports[2]);
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
 
   SCOPED_TRACE("// Primary node up");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[0]);
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("RW and RO queries are working fine");
   ASSERT_NO_FATAL_FAILURE(
@@ -476,17 +476,17 @@ TEST_P(SocketCloseOnMetadataUnavailable, 1RW) {
   setup_router(GetParam().cluster_type);
 
   SCOPED_TRACE("// check if RW port is used");
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
 
   SCOPED_TRACE("// Primary node down");
   simulate_cluster_node_down(node_ports, node_http_ports[0]);
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_TRUE(is_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_x_port));
-  EXPECT_TRUE(is_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_TRUE(is_port_bindable(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_x_port));
+  EXPECT_TRUE(is_port_bindable(router_ro_x_port));
 
   SCOPED_TRACE("// RW and RO queries fail");
   ASSERT_ANY_THROW(
@@ -497,10 +497,10 @@ TEST_P(SocketCloseOnMetadataUnavailable, 1RW) {
   SCOPED_TRACE("// Primary node up");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[0]);
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(is_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_x_port));
-  EXPECT_TRUE(is_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(is_port_bindable(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_x_port));
+  EXPECT_TRUE(is_port_bindable(router_ro_x_port));
 
   SCOPED_TRACE("RW queries are working fine");
   ASSERT_NO_FATAL_FAILURE(
@@ -516,17 +516,17 @@ TEST_P(SocketCloseOnMetadataUnavailable, 1RO) {
   setup_router(GetParam().cluster_type, /*read_only*/ true);
 
   SCOPED_TRACE("// check if RO port is used");
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_x_port));
 
   SCOPED_TRACE("// Node down");
   simulate_cluster_node_down(node_ports, node_http_ports[0]);
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
 
   SCOPED_TRACE("// RW and RO queries fail");
   ASSERT_ANY_THROW(
@@ -537,10 +537,10 @@ TEST_P(SocketCloseOnMetadataUnavailable, 1RO) {
   SCOPED_TRACE("// Node up");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[0], /*no primary*/ true);
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("RO queries are working fine");
   ASSERT_NO_FATAL_FAILURE(
@@ -556,24 +556,24 @@ TEST_P(SocketCloseOnMetadataUnavailable, 2RO) {
   setup_router(GetParam().cluster_type, /*read_only*/ true);
 
   SCOPED_TRACE("// check if RO port is used");
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_x_port));
 
   SCOPED_TRACE("// First node down");
   simulate_cluster_node_down(node_ports, node_http_ports[0]);
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
 
   SCOPED_TRACE("// Second node down");
   simulate_cluster_node_down(node_ports, node_http_ports[1]);
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
 
   SCOPED_TRACE("// RW and RO queries fail");
   ASSERT_ANY_THROW(
@@ -584,25 +584,25 @@ TEST_P(SocketCloseOnMetadataUnavailable, 2RO) {
   SCOPED_TRACE("// Second node up");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[1], /*no primary*/ true);
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("// Second node down");
   simulate_cluster_node_down(node_ports, node_http_ports[1]);
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
 
   SCOPED_TRACE("// First node up");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[0], /*no primary*/ true);
-  EXPECT_TRUE(is_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(is_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(is_port_bindable(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("RO queries are working fine");
   ASSERT_NO_FATAL_FAILURE(
@@ -749,13 +749,9 @@ class SocketUser final {
 const uint16_t SocketUser::error_code;
 const char SocketUser::error_msg[] = "You shall not pass";
 
-class FailToOpenSocketStaticRoundRobin
-    : public SocketCloseTest,
-      public ::testing::WithParamInterface<SocketsCloseTestParams> {};
-
-TEST_P(FailToOpenSocketStaticRoundRobin, StaticRoundRobin) {
+TEST_F(SocketCloseTest, StaticRoundRobin) {
   SCOPED_TRACE("// launch cluster with one node");
-  setup_cluster(1, GetParam().tracefile);
+  setup_cluster(1, "my_port.js");
 
   const auto router_rw_port_str = std::to_string(router_rw_port);
 
@@ -764,11 +760,11 @@ TEST_P(FailToOpenSocketStaticRoundRobin, StaticRoundRobin) {
 
   SCOPED_TRACE("// launch the router with static routing configuration");
   launch_router("", routing_section, EXIT_SUCCESS,
-                /*wait_for_notify_ready=*/5s);
+                /*wait_for_notify_ready=*/30s);
 
   SCOPED_TRACE("// tcp-port:" + router_rw_port_str + " is used by the router");
   // check with netstat that the port is used by router.
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
 
   SCOPED_TRACE(
       "// kill backend and wait until router has released the tcp-port:" +
@@ -779,21 +775,20 @@ TEST_P(FailToOpenSocketStaticRoundRobin, StaticRoundRobin) {
   EXPECT_THROW(
       try_connection("127.0.0.1", router_rw_port, custom_user, custom_password),
       std::runtime_error);
-  EXPECT_TRUE(wait_for_port_available(router_rw_port, 120s));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port, 120s));
 
   SCOPED_TRACE("// block router from binding to tcp-port:" +
                router_rw_port_str + " by let another app bind to it");
   SocketUser socket_user("127.0.0.1", router_rw_port);
   EXPECT_TRUE(socket_user.lock());
 
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port, 120s));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port, 120s));
 
   SCOPED_TRACE("// Restore a cluster node on tcp-port " +
                std::to_string(node_ports[0]) +
                " to bring the destination back from "
                "quarantine.");
-  const std::string json_metadata =
-      get_data_dir().join(GetParam().tracefile).str();
+  const std::string json_metadata = get_data_dir().join("my_port.js").str();
   cluster_nodes.push_back(&launch_mysql_server_mock(
       json_metadata, node_ports[0], EXIT_SUCCESS, false, node_http_ports[0]));
 
@@ -811,12 +806,17 @@ TEST_P(FailToOpenSocketStaticRoundRobin, StaticRoundRobin) {
     EXPECT_THAT(e.what(), ::testing::HasSubstr(SocketUser::error_msg));
   }
 
+  // sleep for a while to test that when the quarantine wants to reopen the
+  // acceptor port and it fails it will still be retried later when the port
+  // become available
+  std::this_thread::sleep_for(1.5s);
+
   SCOPED_TRACE("// Release the tcp-port:" + router_rw_port_str +
                ", and wait a bit to set router bind to the port again");
   socket_user.unlock();
 
   SCOPED_TRACE("// wait until the router binds to the port again.");
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port, 120s));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port, 120s));
 
   try {
     try_connection("127.0.0.1", router_rw_port, custom_user, custom_password);
@@ -824,17 +824,6 @@ TEST_P(FailToOpenSocketStaticRoundRobin, StaticRoundRobin) {
     FAIL() << e.what();
   }
 }
-
-INSTANTIATE_TEST_SUITE_P(
-    FailToOpenSocketStaticRoundRobinTest, FailToOpenSocketStaticRoundRobin,
-    ::testing::Values(
-        SocketsCloseTestParams("metadata_dynamic_nodes_v2_gr.js",
-                               "static_round_robin_fail_to_open_socket_gr_v2",
-                               ClusterType::GR_V2),
-        SocketsCloseTestParams("metadata_dynamic_nodes_v2_ar.js",
-                               "static_round_robin_fail_to_open_socket_ar_v2",
-                               ClusterType::RS_V2)),
-    get_test_description);
 
 enum class PortType { RW, RO, X_RW, X_RO };
 
@@ -875,18 +864,18 @@ TEST_P(FailToOpenROSocketAfterStartup, ROportTaken) {
 
   SCOPED_TRACE("// launch the router with metadata-cache configuration");
   setup_router(GetParam().cluster_type);
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
 
   SCOPED_TRACE("// RO nodes hidden");
   set_mock_metadata(node_http_ports[0], "", node_ports, 0, 0, false,
                     "127.0.0.1", {},
                     {"", R"({"tags" : {"_hidden": true} })",
                      R"({"tags" : {"_hidden": true} })"});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_FALSE(is_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
-  EXPECT_FALSE(is_port_available(router_rw_x_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_FALSE(is_port_bindable(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
+  EXPECT_FALSE(is_port_bindable(router_rw_x_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_x_port));
 
   SCOPED_TRACE("// Take RO port by other application");
   SocketUser socket_user("127.0.0.1", test_port);
@@ -896,9 +885,9 @@ TEST_P(FailToOpenROSocketAfterStartup, ROportTaken) {
   set_mock_metadata(node_http_ports[0], "", node_ports, 0, 0, false,
                     "127.0.0.1", {},
                     {"", R"({"tags" : {"_hidden": true} })", ""});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_x_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_x_port));
 
   SCOPED_TRACE("// RO connections should fail");
   EXPECT_NO_THROW(try_connection("127.0.0.1", router_rw_port, custom_user,
@@ -911,7 +900,7 @@ TEST_P(FailToOpenROSocketAfterStartup, ROportTaken) {
   socket_user.unlock();
 
   SCOPED_TRACE("// Wait until the router port is listening again");
-  EXPECT_TRUE(wait_for_port_not_available(test_port));
+  EXPECT_TRUE(wait_for_port_used(test_port));
 
   SCOPED_TRACE("// RO and RW queries should work fine");
   EXPECT_NO_THROW(try_connection("127.0.0.1", router_rw_port, custom_user,
@@ -947,17 +936,17 @@ TEST_P(FailToOpenRWSocketAfterStartup, RWportTaken) {
 
   SCOPED_TRACE("// launch the router with metadata-cache configuration");
   setup_router(GetParam().cluster_type);
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
 
   SCOPED_TRACE("// RW node hidden");
   set_mock_metadata(node_http_ports[0], "", node_ports, 0, 0, false,
                     "127.0.0.1", {},
                     {R"({"tags" : {"_hidden": true} })", "", ""});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_FALSE(is_port_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_available(router_rw_x_port));
-  EXPECT_FALSE(is_port_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_x_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_x_port));
 
   SCOPED_TRACE("// Take RW(X) port by other application");
   SocketUser socket_user("127.0.0.1", test_port);
@@ -966,9 +955,9 @@ TEST_P(FailToOpenRWSocketAfterStartup, RWportTaken) {
   SCOPED_TRACE("// Unhide RW node");
   set_mock_metadata(node_http_ports[0], "", node_ports, 0, 0, false,
                     "127.0.0.1", {}, {"", "", ""});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_x_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_x_port));
 
   SCOPED_TRACE("// RW(X) connections should fail");
   EXPECT_THROW(
@@ -981,7 +970,7 @@ TEST_P(FailToOpenRWSocketAfterStartup, RWportTaken) {
   socket_user.unlock();
 
   SCOPED_TRACE("// Wait for the socket listening again");
-  EXPECT_TRUE(wait_for_port_not_available(test_port));
+  EXPECT_TRUE(wait_for_port_used(test_port));
 
   SCOPED_TRACE("// RO and RW queries should work fine");
   EXPECT_NO_THROW(try_connection("127.0.0.1", router_rw_port, custom_user,
@@ -1110,21 +1099,21 @@ TEST_P(RoundRobinFallback, RoundRobinFallbackTest) {
       router_ro_port, "SECONDARY", "round-robin-with-fallback", "", "ro");
 
   launch_router(metadata_cache_section, routing_section, EXIT_SUCCESS,
-                /*wait_for_notify_ready=*/5s);
+                /*wait_for_notify_ready=*/30s);
 
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
 
   SCOPED_TRACE("// RO nodes hidden");
   set_mock_metadata(node_http_ports[0], "", node_ports, 0, 0, false,
                     "127.0.0.1", {},
                     {"", R"({"tags" : {"_hidden": true} })",
                      R"({"tags" : {"_hidden": true} })"});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
 
   SCOPED_TRACE("// RW and RO sockets are listening");
-  EXPECT_FALSE(is_port_available(router_rw_port));
-  EXPECT_FALSE(is_port_available(router_ro_port));
+  EXPECT_FALSE(is_port_bindable(router_rw_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_port));
   ASSERT_NO_FATAL_FAILURE(try_connection("127.0.0.1", router_ro_port,
                                          router_user, router_password));
   ASSERT_NO_FATAL_FAILURE(try_connection("127.0.0.1", router_rw_port,
@@ -1142,9 +1131,9 @@ TEST_P(RoundRobinFallback, RoundRobinFallbackTest) {
   set_mock_metadata(node_http_ports[0], "", node_ports, 0, 0, false,
                     "127.0.0.1", {},
                     {R"({"tags" : {"_hidden": true} })", "", ""});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_FALSE(is_port_available(router_ro_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_FALSE(is_port_bindable(router_ro_port));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1175,19 +1164,19 @@ TEST_P(FirstAvailableDestMetadataCache, FirstAvailableDestMetadataCacheTest) {
       router_ro_port, "SECONDARY", "first-available", "", "ro");
 
   launch_router(metadata_cache_section, routing_section, EXIT_SUCCESS,
-                /*wait_for_notify_ready=*/5s);
+                /*wait_for_notify_ready=*/30s);
 
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
 
   SCOPED_TRACE("// Disable both secondary nodes");
   set_mock_metadata(node_http_ports[0], "", {node_ports[0]}, 0, 0, false,
                     "localhost", {}, {});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
 
   SCOPED_TRACE("// RO socket is not used by the router");
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
   ASSERT_NO_FATAL_FAILURE(try_connection("127.0.0.1", router_rw_port,
                                          router_user, router_password));
   EXPECT_THROW(
@@ -1197,41 +1186,41 @@ TEST_P(FirstAvailableDestMetadataCache, FirstAvailableDestMetadataCacheTest) {
   SCOPED_TRACE("// Bring back first RO node");
   set_mock_metadata(node_http_ports[0], "", {node_ports[0], node_ports[1]}, 0,
                     0, false, "localhost", {}, {});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
 
   SCOPED_TRACE("// Disable first RO node");
   set_mock_metadata(node_http_ports[0], "", {node_ports[0]}, 0, 0, false,
                     "localhost", {}, {});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
 
   SCOPED_TRACE("// Bring back second RO node");
   set_mock_metadata(node_http_ports[0], "", {node_ports[0], node_ports[2]}, 0,
                     0, false, "localhost", {}, {});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
 
   SCOPED_TRACE("// Disable first RO node");
   set_mock_metadata(node_http_ports[0], "", {node_ports[0]}, 0, 0, false,
                     "localhost", {}, {});
-  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 2));
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
+  EXPECT_TRUE(wait_for_transaction_count_increase(node_http_ports[0], 4));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
 
   SCOPED_TRACE("// Disable primary node");
   simulate_cluster_node_down(node_ports, node_http_ports[0]);
-  EXPECT_TRUE(wait_for_port_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_available(router_ro_port));
+  EXPECT_TRUE(wait_for_port_unused(router_rw_port));
+  EXPECT_TRUE(wait_for_port_unused(router_ro_port));
 
   SCOPED_TRACE("// Bring back all nodes");
   simulate_cluster_node_up(GetParam().cluster_type, node_ports,
                            node_http_ports[0]);
-  EXPECT_TRUE(wait_for_port_not_available(router_rw_port));
-  EXPECT_TRUE(wait_for_port_not_available(router_ro_port));
+  EXPECT_TRUE(wait_for_port_used(router_rw_port));
+  EXPECT_TRUE(wait_for_port_used(router_ro_port));
   ASSERT_NO_FATAL_FAILURE(try_connection("127.0.0.1", router_rw_port,
                                          router_user, router_password));
   ASSERT_NO_FATAL_FAILURE(try_connection("127.0.0.1", router_ro_port,
@@ -1248,11 +1237,7 @@ INSTANTIATE_TEST_SUITE_P(
                                              ClusterType::RS_V2)),
     get_test_description);
 
-class StaticRoutingToNonExistentNodes
-    : public SocketCloseTest,
-      public ::testing::WithParamInterface<SocketsCloseTestParams> {};
-
-TEST_P(StaticRoutingToNonExistentNodes, StaticRoutingToNonExistentNodesTest) {
+TEST_F(SocketCloseTest, StaticRoutingToNonExistentNodesTest) {
   const auto port1 = port_pool_.get_next_available();
   const auto port2 = port_pool_.get_next_available();
   const auto port3 = port_pool_.get_next_available();
@@ -1279,30 +1264,120 @@ TEST_P(StaticRoutingToNonExistentNodes, StaticRoutingToNonExistentNodesTest) {
 
   SCOPED_TRACE("// launch the router with static routing configuration");
   launch_router("", routing_section, EXIT_SUCCESS,
-                /*wait_for_notify_ready=*/5s);
+                /*wait_for_notify_ready=*/30s);
 
   EXPECT_THROW(try_connection("127.0.0.1", port1, custom_user, custom_password),
                std::runtime_error);
-  EXPECT_FALSE(is_port_available(port1));
+  EXPECT_FALSE(is_port_bindable(port1));
 
   EXPECT_THROW(try_connection("127.0.0.1", port2, custom_user, custom_password),
                std::runtime_error);
-  EXPECT_TRUE(wait_for_port_available(port2, 120s));
+  EXPECT_TRUE(wait_for_port_unused(port2, 120s));
 
   EXPECT_THROW(try_connection("127.0.0.1", port3, custom_user, custom_password),
                std::runtime_error);
-  EXPECT_TRUE(wait_for_port_available(port3, 120s));
+  EXPECT_TRUE(wait_for_port_unused(port3, 120s));
+}
+
+struct SharedQuarantineSocketCloseParam {
+  std::string strategy;
+  bool is_socket_closed;
+};
+
+class SharedQuarantineSocketClose
+    : public SocketCloseTest,
+      public ::testing::WithParamInterface<SharedQuarantineSocketCloseParam> {};
+
+TEST_P(SharedQuarantineSocketClose, cross_plugin_socket_shutdown) {
+  setup_cluster(1, "metadata_dynamic_nodes_v2_gr.js");
+  const auto bind_port_r1 = port_pool_.get_next_available();
+  const auto bind_port_r2 = port_pool_.get_next_available();
+  const std::string routing_section{
+      mysql_harness::ConfigBuilder::build_section(
+          "routing:R1",
+          {{"bind_port", std::to_string(bind_port_r1)},
+           {"routing_strategy", "round-robin"},
+           {"destinations", "127.0.0.1:" + std::to_string(node_ports[0])},
+           {"protocol", "classic"}}) +
+      mysql_harness::ConfigBuilder::build_section(
+          "routing:R2",
+          {{"bind_port", std::to_string(bind_port_r2)},
+           {"routing_strategy", GetParam().strategy},
+           {"destinations", "127.0.0.1:" + std::to_string(node_ports[0])},
+           {"protocol", "classic"}})};
+
+  SCOPED_TRACE("// launch the router with static routing configuration");
+  launch_router("", routing_section, EXIT_SUCCESS,
+                /*wait_for_notify_ready=*/30s);
+
+  SCOPED_TRACE("// both routing plugins are working fine");
+  ASSERT_NO_THROW(
+      try_connection("127.0.0.1", bind_port_r1, router_user, router_password));
+  ASSERT_NO_THROW(
+      try_connection("127.0.0.1", bind_port_r2, router_user, router_password));
+
+  SCOPED_TRACE("// kill the server");
+  EXPECT_NO_THROW(cluster_nodes[0]->send_clean_shutdown_event());
+  EXPECT_NO_THROW(cluster_nodes[0]->wait_for_exit());
+
+  SCOPED_TRACE(
+      "// establishing a connection to first routing plugin will add the node "
+      "to a quarantine");
+  ASSERT_ANY_THROW(
+      try_connection("127.0.0.1", bind_port_r1, router_user, router_password));
+  SCOPED_TRACE("// first routing plugin has closed the socket");
+  EXPECT_TRUE(wait_for_port_unused(bind_port_r1, 120s));
+  SCOPED_TRACE(
+      "// second routing plugin has closed socket even though there were no "
+      "incoming connections (unless it is using first-available policy)");
+  EXPECT_EQ(GetParam().is_socket_closed,
+            wait_for_port_unused(bind_port_r2, 1s));
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    StaticRoutingToNonExistentNodesTest, StaticRoutingToNonExistentNodes,
-    ::testing::Values(SocketsCloseTestParams("metadata_dynamic_nodes_v2_gr.js",
-                                             "non_existent_nodes_gr_v2",
-                                             ClusterType::GR_V2),
-                      SocketsCloseTestParams("metadata_dynamic_nodes_v2_ar.js",
-                                             "non_existent_nodes_ar_v2",
-                                             ClusterType::RS_V2)),
-    get_test_description);
+    SharedQuarantineSocketCloseTest, SharedQuarantineSocketClose,
+    ::testing::Values(SharedQuarantineSocketCloseParam{"round-robin", true},
+                      SharedQuarantineSocketCloseParam{"next-available", true},
+                      SharedQuarantineSocketCloseParam{"first-available",
+                                                       false}));
+
+class SharedQuarantineSocketCloseWithFallback : public SocketCloseTest {};
+
+TEST_F(SharedQuarantineSocketCloseWithFallback,
+       cross_plugin_socket_close_with_fallback) {
+  SCOPED_TRACE("// launch cluster with 2 nodes, 1 RW/1 RO");
+  ASSERT_NO_FATAL_FAILURE(setup_cluster(2, "metadata_dynamic_nodes_v2_gr.js"));
+
+  const auto bind_port_r1 = port_pool_.get_next_available();
+  const auto bind_port_r2 = port_pool_.get_next_available();
+  const auto bind_port_r3 = port_pool_.get_next_available();
+  const std::string metadata_cache_section =
+      get_metadata_cache_section(node_ports, ClusterType::GR_V2);
+  std::string routing_section = get_metadata_cache_routing_section(
+      bind_port_r1, "PRIMARY", "round-robin", "", "r1");
+  routing_section += get_metadata_cache_routing_section(
+      bind_port_r2, "SECONDARY", "round-robin-with-fallback", "", "r2");
+  routing_section +=
+      get_static_routing_section(bind_port_r3, {node_ports[1]}, "round-robin");
+
+  SCOPED_TRACE("// launch the router with metadata-cache configuration");
+  launch_router(metadata_cache_section, routing_section, EXIT_SUCCESS);
+
+  SCOPED_TRACE("// kill the RO server");
+  EXPECT_NO_THROW(cluster_nodes[1]->send_clean_shutdown_event());
+  EXPECT_NO_THROW(cluster_nodes[1]->wait_for_exit());
+
+  SCOPED_TRACE(
+      "// establishing a connection to static routing plugin will add the node "
+      "to a quarantine");
+  ASSERT_ANY_THROW(
+      try_connection("127.0.0.1", bind_port_r3, router_user, router_password));
+  SCOPED_TRACE("// static routing plugin has closed the socket");
+  EXPECT_TRUE(wait_for_port_unused(bind_port_r3, 120s));
+
+  SCOPED_TRACE("// fallback is possible, do not close the RO socket");
+  EXPECT_FALSE(wait_for_port_unused(bind_port_r2, 1s));
+}
 
 int main(int argc, char *argv[]) {
   init_windows_sockets();

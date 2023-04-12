@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2010, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -106,7 +106,7 @@ bool Column_name_comparator::operator()(const String *lhs,
   return sortcmp(lhs, rhs, lhs->charset()) < 0;
 }
 
-static int send_check_errmsg(THD *thd, TABLE_LIST *table,
+static int send_check_errmsg(THD *thd, Table_ref *table,
                              const char *operator_name, const char *errmsg)
 
 {
@@ -121,7 +121,7 @@ static int send_check_errmsg(THD *thd, TABLE_LIST *table,
   return 1;
 }
 
-static int prepare_for_repair(THD *thd, TABLE_LIST *table_list,
+static int prepare_for_repair(THD *thd, Table_ref *table_list,
                               HA_CHECK_OPT *check_opt) {
   int error = 0;
   TABLE tmp_table, *table;
@@ -190,8 +190,8 @@ static int prepare_for_repair(THD *thd, TABLE_LIST *table_list,
   /*
     Check if this is a table type that stores index and data separately,
     like ISAM or MyISAM. We assume fixed order of engine file name
-    extentions array. First element of engine file name extentions array
-    is meta/index file extention. Second element - data file extention.
+    extensions array. First element of engine file name extensions array
+    is meta/index file extension. Second element - data file extension.
   */
   ext = table->file->ht->file_extensions;
   if (!ext || !ext[0] || !ext[1]) goto end;  // No data file
@@ -291,14 +291,15 @@ static inline bool table_not_corrupt_error(uint sql_errno) {
 
 Sql_cmd_analyze_table::Sql_cmd_analyze_table(
     THD *thd, Alter_info *alter_info, Histogram_command histogram_command,
-    int histogram_buckets)
+    int histogram_buckets, LEX_STRING data)
     : Sql_cmd_ddl_table(alter_info),
       m_histogram_command(histogram_command),
       m_histogram_fields(Column_name_comparator(),
                          Mem_root_allocator<String>(thd->mem_root)),
-      m_histogram_buckets(histogram_buckets) {}
+      m_histogram_buckets(histogram_buckets),
+      m_data{data} {}
 
-bool Sql_cmd_analyze_table::drop_histogram(THD *thd, TABLE_LIST *table,
+bool Sql_cmd_analyze_table::drop_histogram(THD *thd, Table_ref *table,
                                            histograms::results_map &results) {
   histograms::columns_set fields;
 
@@ -345,7 +346,7 @@ static bool send_analyze_table_errors(THD *thd, const char *operator_name,
 }
 
 bool Sql_cmd_analyze_table::send_histogram_results(
-    THD *thd, const histograms::results_map &results, const TABLE_LIST *table) {
+    THD *thd, const histograms::results_map &results, const Table_ref *table) {
   Item *item;
   mem_root_deque<Item *> field_list(thd->mem_root);
 
@@ -390,7 +391,7 @@ bool Sql_cmd_analyze_table::send_histogram_results(
         message.append(pair.first);
         message.append("'.");
         break;
-      // Errror messages
+      // Error messages
       case histograms::Message::FIELD_NOT_FOUND:
         message_type.assign("Error");
         message.assign("The column '");
@@ -424,6 +425,12 @@ bool Sql_cmd_analyze_table::send_histogram_results(
             "statistics.");
         table_name = "";
         break;
+      case histograms::Message::MULTIPLE_COLUMNS_SPECIFIED:
+        message_type.assign("Error");
+        message.assign(
+            "Only one column can be specified while modifying histogram "
+            "statistics with JSON data.");
+        break;
       case histograms::Message::COVERED_BY_SINGLE_PART_UNIQUE_INDEX:
         message_type.assign("Error");
         message.assign("The column '");
@@ -440,6 +447,157 @@ bool Sql_cmd_analyze_table::send_histogram_results(
         message_type.assign("Error");
         message.assign("The server is in read-only mode.");
         table_name = "";
+        break;
+      case histograms::Message::JSON_FORMAT_ERROR:
+        message_type.assign("Error");
+        message.assign("JSON format error.");
+        break;
+      case histograms::Message::JSON_NOT_AN_OBJECT:
+        message_type.assign("Error");
+        message.assign("JSON data is not an object");
+        break;
+      case histograms::Message::JSON_MISSING_ATTRIBUTE:
+        message_type.assign("Error");
+        message.assign("Missing attribute at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_WRONG_ATTRIBUTE_TYPE:
+        message_type.assign("Error");
+        message.assign("Wrong attribute type at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_WRONG_BUCKET_TYPE_2:
+        message_type.assign("Error");
+        message.assign("Two elements required for bucket at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_WRONG_BUCKET_TYPE_4:
+        message_type.assign("Error");
+        message.assign("Four elements required for bucket at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_WRONG_DATA_TYPE:
+        message_type.assign("Error");
+        message.assign(
+            "Histogram data type does not match column data type "
+            "at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_UNSUPPORTED_DATA_TYPE:
+        message_type.assign("Error");
+        message.assign("Unsupported data type at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_UNSUPPORTED_HISTOGRAM_TYPE:
+        message_type.assign("Error");
+        message.assign("Unsupported histogram type at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_UNSUPPORTED_CHARSET:
+        message_type.assign("Error");
+        message.assign("The charset ID does not exist at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_INVALID_SAMPLING_RATE:
+        message_type.assign("Error");
+        message.assign(
+            "The sampling rate must be greater than or equal to 0 and "
+            "less than or equal to 1 at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_INVALID_NUM_BUCKETS_SPECIFIED:
+        message_type.assign("Error");
+        message.assign(
+            "The value of attribute number-of-buckets-specified must be an "
+            "integer in the range from 1 to 1024 at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_INVALID_FREQUENCY:
+        message_type.assign("Error");
+        message.assign(
+            "The frequency must be greater than or equal to 0 and "
+            "less than or equal to 1 at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_INVALID_NUM_DISTINCT:
+        message_type.assign("Error");
+        message.assign(
+            "The number of distinct values must be a positive integer at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_VALUE_FORMAT_ERROR:
+        message_type.assign("Error");
+        message.assign("Value format error at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_VALUE_OUT_OF_RANGE:
+        message_type.assign("Error");
+        message.assign("Out of range value for column at '");
+        message.append(pair.first);
+        message.append("'.");
+        break;
+      case histograms::Message::JSON_VALUE_NOT_ASCENDING_1:
+        message_type.assign("Error");
+        message.assign("The value at '");
+        message.append(pair.first);
+        message.append("' must be greater than that of previous bucket.");
+        break;
+      case histograms::Message::JSON_VALUE_NOT_ASCENDING_2:
+        message_type.assign("Error");
+        message.assign("The lower inclusive value of bucket at '");
+        message.append(pair.first);
+        message.append(
+            "' must be greater than the "
+            "upper inclusive value of previous bucket.");
+        break;
+      case histograms::Message::JSON_VALUE_DESCENDING_IN_BUCKET:
+        message_type.assign("Error");
+        message.assign("The lower inclusive value of bucket at '");
+        message.append(pair.first);
+        message.append(
+            "' must be less than or equal "
+            "to upper inclusive value.");
+        break;
+      case histograms::Message::JSON_CUMULATIVE_FREQUENCY_NOT_ASCENDING:
+        message_type.assign("Error");
+        message.assign("The cumulative frequency of bucket at '");
+        message.append(pair.first);
+        message.append(
+            "' must be greater than that of previous "
+            "bucket.");
+        break;
+      case histograms::Message::JSON_INVALID_NULL_VALUES_FRACTION:
+        message_type.assign("Error");
+        message.assign("The null values fraction should be 0 or 1.");
+        break;
+      case histograms::Message::JSON_INVALID_TOTAL_FREQUENCY:
+        message_type.assign("Error");
+        message.assign(
+            "The sum of the null values fraction and the cumulative frequency "
+            "of the last bucket should be 1.'");
+        break;
+      case histograms::Message::JSON_NUM_BUCKETS_MORE_THAN_SPECIFIED:
+        message_type.assign("Error");
+        message.assign(
+            "The number of real buckets must be less than or equal to the "
+            "number specified by attribute number-of-buckets-specified.");
+        break;
+      case histograms::Message::JSON_IMPOSSIBLE_EMPTY_EQUI_HEIGHT:
+        message_type.assign("Error");
+        message.assign("Equi-height histogram must have at least one bucket");
         break;
     }
 
@@ -459,7 +617,7 @@ bool Sql_cmd_analyze_table::send_histogram_results(
   return false;
 }
 
-bool Sql_cmd_analyze_table::update_histogram(THD *thd, TABLE_LIST *table,
+bool Sql_cmd_analyze_table::update_histogram(THD *thd, Table_ref *table,
                                              histograms::results_map &results) {
   histograms::columns_set fields;
 
@@ -467,7 +625,8 @@ bool Sql_cmd_analyze_table::update_histogram(THD *thd, TABLE_LIST *table,
     fields.emplace(column->ptr(), column->length());
 
   return histograms::update_histogram(thd, table, fields,
-                                      get_histogram_buckets(), results);
+                                      get_histogram_buckets(),
+                                      get_histogram_data_string(), results);
 }
 
 using Check_result = std::pair<bool, int>;
@@ -537,10 +696,10 @@ static Check_result check_for_upgrade(THD *thd, dd::String_type &sname,
           (admin operation or network communication failed)
 */
 static bool mysql_admin_table(
-    THD *thd, TABLE_LIST *tables, HA_CHECK_OPT *check_opt,
+    THD *thd, Table_ref *tables, HA_CHECK_OPT *check_opt,
     const char *operator_name, thr_lock_type lock_type, bool open_for_modify,
     bool repair_table_use_frm, uint extra_open_options,
-    int (*prepare_func)(THD *, TABLE_LIST *, HA_CHECK_OPT *),
+    int (*prepare_func)(THD *, Table_ref *, HA_CHECK_OPT *),
     int (handler::*operator_func)(THD *, HA_CHECK_OPT *), int check_view,
     Alter_info *alter_info, bool need_to_acquire_shared_backup_lock) {
   /*
@@ -552,7 +711,7 @@ static bool mysql_admin_table(
 
   dd::cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
 
-  TABLE_LIST *table;
+  Table_ref *table;
   Query_block *select = thd->lex->query_block;
   Item *item;
   Protocol *protocol = thd->get_protocol();
@@ -620,12 +779,12 @@ static bool mysql_admin_table(
                                     : MDL_SHARED_READ);
     /* open only one table from local list of command */
     {
-      TABLE_LIST *save_next_global, *save_next_local;
+      Table_ref *save_next_global, *save_next_local;
       save_next_global = table->next_global;
       table->next_global = nullptr;
       save_next_local = table->next_local;
       table->next_local = nullptr;
-      select->table_list.first = table;
+      select->m_table_list.first = table;
       /*
         Time zone tables and SP tables can be add to lex->query_tables list,
         so it have to be prepared.
@@ -1120,8 +1279,8 @@ static bool mysql_admin_table(
         }
         if (protocol->end_row()) goto err;
         DBUG_PRINT("info", ("HA_ADMIN_TRY_ALTER, trying analyze..."));
-        TABLE_LIST *save_next_local = table->next_local,
-                   *save_next_global = table->next_global;
+        Table_ref *save_next_local = table->next_local,
+                  *save_next_global = table->next_global;
         table->next_local = table->next_global = nullptr;
         {
           // binlogging is done by caller if wanted
@@ -1396,13 +1555,13 @@ err:
    true  error
 */
 
-bool Sql_cmd_cache_index::assign_to_keycache(THD *thd, TABLE_LIST *tables) {
+bool Sql_cmd_cache_index::assign_to_keycache(THD *thd, Table_ref *tables) {
   HA_CHECK_OPT check_opt;
   KEY_CACHE *key_cache;
   DBUG_TRACE;
 
   mysql_mutex_lock(&LOCK_global_system_variables);
-  if (!(key_cache = get_key_cache(&m_key_cache_name))) {
+  if (!(key_cache = get_key_cache(to_string_view(m_key_cache_name)))) {
     mysql_mutex_unlock(&LOCK_global_system_variables);
     my_error(ER_UNKNOWN_KEY_CACHE, MYF(0), m_key_cache_name.str);
     return true;
@@ -1433,7 +1592,7 @@ bool Sql_cmd_cache_index::assign_to_keycache(THD *thd, TABLE_LIST *tables) {
     true  error
 */
 
-bool Sql_cmd_load_index::preload_keys(THD *thd, TABLE_LIST *tables) {
+bool Sql_cmd_load_index::preload_keys(THD *thd, Table_ref *tables) {
   DBUG_TRACE;
   /*
     We cannot allow concurrent inserts. The storage engine reads
@@ -1463,7 +1622,7 @@ bool Sql_cmd_analyze_table::set_histogram_fields(List<String> *fields) {
 }
 
 bool Sql_cmd_analyze_table::handle_histogram_command(THD *thd,
-                                                     TABLE_LIST *table) {
+                                                     Table_ref *table) {
   // This should not be empty here.
   assert(!get_histogram_fields().empty());
 
@@ -1536,7 +1695,7 @@ bool Sql_cmd_analyze_table::handle_histogram_command(THD *thd,
         /*
           If a histogram was added, updated or removed, we will request the old
           TABLE_SHARE to go away from the table definition cache. This is
-          beacuse histogram data is cached in the TABLE_SHARE, so we want new
+          because histogram data is cached in the TABLE_SHARE, so we want new
           transactions to fetch the updated data into the TABLE_SHARE before
           using it again.
         */
@@ -1554,7 +1713,7 @@ bool Sql_cmd_analyze_table::handle_histogram_command(THD *thd,
 }
 
 bool Sql_cmd_analyze_table::execute(THD *thd) {
-  TABLE_LIST *first_table = thd->lex->query_block->get_table_list();
+  Table_ref *first_table = thd->lex->query_block->get_table_list();
   bool res = true;
   thr_lock_type lock_type = TL_READ_NO_INSERT;
   DBUG_TRACE;
@@ -1585,7 +1744,7 @@ bool Sql_cmd_analyze_table::execute(THD *thd) {
     */
     res = write_bin_log(thd, true, thd->query().str, thd->query().length);
   }
-  thd->lex->query_block->table_list.first = first_table;
+  thd->lex->query_block->m_table_list.first = first_table;
   thd->lex->query_tables = first_table;
 
 error:
@@ -1593,7 +1752,7 @@ error:
 }
 
 bool Sql_cmd_check_table::execute(THD *thd) {
-  TABLE_LIST *first_table = thd->lex->query_block->get_table_list();
+  Table_ref *first_table = thd->lex->query_block->get_table_list();
   thr_lock_type lock_type = TL_READ_NO_INSERT;
   bool res = true;
   DBUG_TRACE;
@@ -1606,7 +1765,7 @@ bool Sql_cmd_check_table::execute(THD *thd) {
                           lock_type, false, false, HA_OPEN_FOR_REPAIR, nullptr,
                           &handler::ha_check, 1, m_alter_info, true);
 
-  thd->lex->query_block->table_list.first = first_table;
+  thd->lex->query_block->m_table_list.first = first_table;
   thd->lex->query_tables = first_table;
 
 error:
@@ -1614,7 +1773,7 @@ error:
 }
 
 bool Sql_cmd_optimize_table::execute(THD *thd) {
-  TABLE_LIST *first_table = thd->lex->query_block->get_table_list();
+  Table_ref *first_table = thd->lex->query_block->get_table_list();
   bool res = true;
   DBUG_TRACE;
 
@@ -1634,7 +1793,7 @@ bool Sql_cmd_optimize_table::execute(THD *thd) {
     */
     res = write_bin_log(thd, true, thd->query().str, thd->query().length);
   }
-  thd->lex->query_block->table_list.first = first_table;
+  thd->lex->query_block->m_table_list.first = first_table;
   thd->lex->query_tables = first_table;
 
 error:
@@ -1642,7 +1801,7 @@ error:
 }
 
 bool Sql_cmd_repair_table::execute(THD *thd) {
-  TABLE_LIST *first_table = thd->lex->query_block->get_table_list();
+  Table_ref *first_table = thd->lex->query_block->get_table_list();
   bool res = true;
   DBUG_TRACE;
 
@@ -1662,7 +1821,7 @@ bool Sql_cmd_repair_table::execute(THD *thd) {
     */
     res = write_bin_log(thd, true, thd->query().str, thd->query().length);
   }
-  thd->lex->query_block->table_list.first = first_table;
+  thd->lex->query_block->m_table_list.first = first_table;
   thd->lex->query_tables = first_table;
 
 error:
@@ -2135,9 +2294,12 @@ bool Sql_cmd_set_role::execute(THD *thd) {
 
     Update the flag in THD if invoker has SYSTEM_USER privilege not if the
     definer user has that privilege.
+    Do the same for the CONNECTION_ADMIN user privilege flag.
   */
-  if (!ret) set_system_user_flag(thd, true);
-
+  if (!ret) {
+    set_system_user_flag(thd, true);
+    set_connection_admin_flag(thd, true);
+  }
   return ret;
 }
 

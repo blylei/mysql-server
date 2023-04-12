@@ -1,4 +1,4 @@
-# Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -42,6 +42,7 @@ SET(GROUP_REPLICATION_SOURCES
   src/group_actions/group_action_coordinator.cc
   src/group_actions/multi_primary_migration_action.cc
   src/group_actions/primary_election_action.cc
+  src/group_actions/group_actions_transaction_controller.cc
   src/handlers/applier_handler.cc
   src/handlers/certification_handler.cc
   src/handlers/event_cataloger.cc
@@ -66,7 +67,6 @@ SET(GROUP_REPLICATION_SOURCES
   src/plugin_handlers/member_actions_handler.cc
   src/plugin_handlers/member_actions_handler_configuration.cc
   src/plugin_handlers/offline_mode_handler.cc
-  src/plugin_handlers/persistent_variables_handler.cc
   src/plugin_handlers/primary_election_invocation_handler.cc
   src/plugin_handlers/primary_election_primary_process.cc
   src/plugin_handlers/primary_election_secondary_process.cc
@@ -96,11 +96,13 @@ SET(GROUP_REPLICATION_SOURCES
   src/recovery_channel_state_observer.cc
   src/recovery_state_transfer.cc
   src/replication_threads_api.cc
-  src/services/get_system_variable/get_system_variable.cc
   src/services/message_service/message_service.cc
   src/services/notification/notification.cc
   src/services/status_service/status_service.cc
+  src/services/system_variable/get_system_variable.cc
+  src/services/system_variable/set_system_variable.cc
   src/services/registry.cc
+  src/services/server_services_references.cc
   src/sql_service/sql_command_test.cc
   src/sql_service/sql_resultset.cc
   src/sql_service/sql_service_command.cc

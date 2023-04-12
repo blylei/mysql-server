@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -109,7 +109,7 @@ public:
     TableLoggedFlag    = 4,  //Default Logged
     NoOfKeyAttr        = 5,  //Default 1
     NoOfAttributes     = 6,  //Mandatory
-    NoOfNullable       = 7,  //Deafult 0
+    NoOfNullable       = 7,  //Default 0
     NoOfVariable       = 8,  //Default 0
     TableKValue        = 9,  //Default 6
     MinLoadFactor      = 10, //Default 70
@@ -254,7 +254,8 @@ public:
 
   // used 1) until type BlobTable added 2) in upgrade code
   static bool
-  isBlobTableName(const char* name, Uint32* ptab_id = 0, Uint32* pcol_no = 0);
+  isBlobTableName(const char* name, Uint32* ptab_id = nullptr,
+                  Uint32* pcol_no = nullptr);
   
   static inline bool
   isTable(int tableType) {

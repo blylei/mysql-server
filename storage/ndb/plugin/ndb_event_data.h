@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -95,7 +95,7 @@ class Ndb_event_data {
   const bool have_blobs;
 
   // Bitmap with all stored columns, used as the initial value when determining
-  // which attributes are receieved in an event
+  // which attributes are received in an event
   MY_BITMAP stored_columns;
 
  private:

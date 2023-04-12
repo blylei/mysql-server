@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -33,17 +33,18 @@
 #include <windows.h>
 #include <winsock2.h>
 
-#include "../default_paths.h"
 #include "harness_assert.h"
 #include "main-windows.h"
 #include "mysql/harness/loader.h"
 #include "mysql/harness/logging/eventlog_plugin.h"
+#include "mysql/harness/process_state_component.h"
+#include "mysql/harness/signal_handler.h"
+#include "mysqlrouter/default_paths.h"
 #include "mysqlrouter/utils.h"  // write_windows_event_log
 #include "mysqlrouter/windows/service_operations.h"
 #include "nt_servc.h"
 
 // forward declarations
-std::string get_logging_folder(const std::string &conf_file);
 void allow_windows_service_to_write_logs(const std::string &conf_file);
 
 namespace {
@@ -63,7 +64,7 @@ int (*g_real_main)(int, char **, bool);
  * Rationale: When running as a service, user can't see the console, that's why
  *            we need to log to Eventlog. OTOH when running as a normal
  *            process, user can see console, so logging to Eventlog is not
- *            neccessary, furthermore, probably something user doesn't expect,
+ *            necessary, furthermore, probably something user doesn't expect,
  *            therefore we should not do it. However, there are times when we
  *            don't know if we're running as a service or not, in which case we
  *            must choose the safe approach and log to Eventlog, just in case
@@ -330,16 +331,6 @@ void allow_windows_service_to_write_logs(const std::string &conf_file) {
   }
 }
 
-/** @brief Wrapper for request_application_shutdown()
- *
- * The service Init() method must call a function without parameters on
- * shutdown, hence the need for a wrapper function for
- * request_application_shutdown().
- */
-static void service_request_shutdown() {
-  request_application_shutdown(SHUTDOWN_REQUESTED);
-}
-
 int proxy_main(int (*real_main)(int, char **, bool), int argc, char **argv) {
   int result = 0;
   std::string service_name;
@@ -354,8 +345,12 @@ int proxy_main(int (*real_main)(int, char **, bool), int argc, char **argv) {
         // - g_service.Stop()        (called by us after main() finishes)
         // - g_service.StopService() (triggered by OS due to outside event, such
         // as termination request)
-        BOOL ok = g_service.Init(service_name.c_str(), (void *)router_service,
-                                 service_request_shutdown);
+        BOOL ok =
+            g_service.Init(service_name.c_str(), (void *)router_service, []() {
+              mysql_harness::ProcessStateComponent::get_instance()
+                  .request_application_shutdown(
+                      mysql_harness::ShutdownPending::Reason::REQUESTED);
+            });
         if (!ok) {
           const std::error_code ec{static_cast<int>(GetLastError()),
                                    std::system_category()};
@@ -380,7 +375,6 @@ int proxy_main(int (*real_main)(int, char **, bool), int argc, char **argv) {
       break;
     case ServiceStatus::StartNormal:  // case when Router runs from "DOS"
                                       // console
-      register_ctrl_c_handler();
       g_service.SetRunning();
       result = real_main(argc, argv, false);  // false = log initially to STDERR
       break;

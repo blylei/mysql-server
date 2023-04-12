@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -153,8 +153,10 @@ class Hint_scanner {
 
             ptr++;  // skip closing quote
 
-            if (thd->charset_is_system_charset && double_separators == 0)
+            if (thd->charset_is_system_charset && double_separators == 0) {
+              yytext = thd->strmake(yytext, yyleng);  // null-terminate it.
               return ret;
+            }
 
             LEX_STRING s;
             if (!thd->charset_is_system_charset) {

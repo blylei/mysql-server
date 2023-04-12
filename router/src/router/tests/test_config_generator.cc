@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -44,7 +44,7 @@
 #include <mysql.h>
 
 #include "cluster_metadata.h"
-#include "common.h"
+#include "common.h"  // list_elements
 #include "config_generator.h"
 #include "dim.h"
 #include "gtest_consoleoutput.h"
@@ -159,11 +159,6 @@ class TestConfigGenerator : public mysqlrouter::ConfigGenerator {
     return __base::get_account_host_args(multivalue_options);
   }
 };
-
-const std::string kDefaultConnectTimeout =
-    std::to_string(mysqlrouter::MySQLSession::kDefaultConnectTimeout);
-const std::string kDefaultReadTimeout =
-    std::to_string(mysqlrouter::MySQLSession::kDefaultReadTimeout);
 
 class ReplayerWithMockSSL : public MySQLSessionReplayer {
  public:
@@ -336,13 +331,14 @@ TEST_F(ConfigGeneratorTest, fetch_bootstrap_servers_one) {
     config_gen.init(kServerUrl, {});
 
     mock_mysql->expect_query("").then_return(
-        3, {{"id", "mycluster", "somehost:3306"}});
+        3, {{"91d01072-63cd-11ec-9a29-080027ac264d", "my-cluster",
+             "somehost:3306"}});
 
     const auto cluster_info = config_gen.metadata()->fetch_metadata_servers();
 
     ASSERT_THAT(mysql_harness::list_elements(cluster_info.metadata_servers),
                 Eq("mysql://somehost:3306"));
-    ASSERT_THAT(cluster_info.name, Eq("mycluster"));
+    ASSERT_THAT(cluster_info.name, Eq("my-cluster"));
   }
 
   {
@@ -351,13 +347,14 @@ TEST_F(ConfigGeneratorTest, fetch_bootstrap_servers_one) {
     config_gen.init(kServerUrl, {});
 
     mock_mysql->expect_query("").then_return(
-        3, {{"id", "mycluster", "somehost:3306"}});
+        3, {{"91d01072-63cd-11ec-9a29-080027ac264d", "my-cluster",
+             "somehost:3306"}});
 
     const auto cluster_info = config_gen.metadata()->fetch_metadata_servers();
 
     ASSERT_THAT(mysql_harness::list_elements(cluster_info.metadata_servers),
                 Eq("mysql://somehost:3306"));
-    ASSERT_THAT(cluster_info.name, Eq("mycluster"));
+    ASSERT_THAT(cluster_info.name, Eq("my-cluster"));
   }
 }
 
@@ -370,16 +367,17 @@ TEST_F(ConfigGeneratorTest, fetch_bootstrap_servers_three) {
     // select c.cluster_id, c.cluster_name, i.address from
     // mysql_innodb_cluster_metadata.v2_instances...
     mock_mysql->expect_query("").then_return(
-        3, {{"id", "mycluster", "somehost:3306"},
-            {"id", "mycluster", "otherhost:3306"},
-            {"id", "mycluster", "sumhost:3306"}});
+        3,
+        {{"91d0107263cd11ec9a29080027ac264d", "my-cluster", "somehost:3306"},
+         {"91d0107263cd11ec9a29080027ac264d", "my-cluster", "otherhost:3306"},
+         {"91d0107263cd11ec9a29080027ac264d", "my-cluster", "sumhost:3306"}});
 
     const auto cluster_info = config_gen.metadata()->fetch_metadata_servers();
 
     ASSERT_THAT(mysql_harness::list_elements(cluster_info.metadata_servers),
                 Eq("mysql://somehost:3306,mysql://otherhost:3306,mysql://"
                    "sumhost:3306"));
-    ASSERT_THAT(cluster_info.name, Eq("mycluster"));
+    ASSERT_THAT(cluster_info.name, Eq("my-cluster"));
   }
 }
 
@@ -754,7 +752,7 @@ TEST_F(ConfigGeneratorTest, create_accounts_multiple_accounts_if_not_exists) {
  * - SHOW WARNINGS parsing code handles well
  */
 TEST_F(ConfigGeneratorTest, create_accounts___show_warnings_parser_1) {
-  // SHOW WARNIGNS example output
+  // SHOW WARNINGS example output
   // +-------+------+---------------------------------------------+
   // | Level | Code | Message                                     |
   // +-------+------+---------------------------------------------+
@@ -1539,8 +1537,10 @@ class CreateConfigGeneratorTest : public ConfigGeneratorTest {
   void SetUp() override {
     ConfigGeneratorTest::SetUp();
 
-    cluster_info = {
-        {"server1", "server2", "server3"}, "id", "gr_id", "mycluster"};
+    cluster_info = {{"server1", "server2", "server3"},
+                    "91d0107263cd11ec9a29080027ac264d",
+                    "gr_id",
+                    "my-cluster"};
 
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
@@ -1602,53 +1602,58 @@ TEST_F(CreateConfigGeneratorTest, create_config_basic) {
       "[DEFAULT]",
       "name=myrouter",
       "user=mysqlrouter",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6446",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6447",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6448",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6449",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -1689,53 +1694,58 @@ TEST_F(CreateConfigGeneratorTest, create_config_system_instance) {
   std::vector<std::string> expected_config_lines = {
       "# File automatically generated during MySQL Router bootstrap",
       "[DEFAULT]",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6446",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6447",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6448",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6449",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -1779,53 +1789,58 @@ TEST_F(CreateConfigGeneratorTest, create_config_base_port) {
   std::vector<std::string> expected_config_lines = {
       "# File automatically generated during MySQL Router bootstrap",
       "[DEFAULT]",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "bind_address=0.0.0.0",
       "bind_port=1234",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "bind_address=0.0.0.0",
       "bind_port=1235",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "bind_address=0.0.0.0",
       "bind_port=1236",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "bind_address=0.0.0.0",
       "bind_port=1237",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -1873,49 +1888,55 @@ TEST_F(CreateConfigGeneratorTest, create_config_skip_tcp) {
   std::vector<std::string> expected_config_lines = {
       "# File automatically generated during MySQL Router bootstrap",
       "[DEFAULT]",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
+
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "socket=" + test_dir.name() + "/mysql.sock",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "socket=" + test_dir.name() + "/mysqlro.sock",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "socket=" + test_dir.name() + "/mysqlx.sock",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "socket=" + test_dir.name() + "/mysqlxro.sock",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -1959,57 +1980,62 @@ TEST_F(CreateConfigGeneratorTest, create_config_use_sockets) {
   std::vector<std::string> expected_config_lines = {
       "# File automatically generated during MySQL Router bootstrap",
       "[DEFAULT]",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6446",
       "socket=" + test_dir.name() + "/mysql.sock",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6447",
       "socket=" + test_dir.name() + "/mysqlro.sock",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6448",
       "socket=" + test_dir.name() + "/mysqlx.sock",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6449",
       "socket=" + test_dir.name() + "/mysqlxro.sock",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -2056,53 +2082,58 @@ TEST_F(CreateConfigGeneratorTest, create_config_bind_address) {
       "[DEFAULT]",
       "name=myrouter",
       "user=mysqlrouter",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "bind_address=127.0.0.1",
       "bind_port=6446",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "bind_address=127.0.0.1",
       "bind_port=6447",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "bind_address=127.0.0.1",
       "bind_port=6448",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "bind_address=127.0.0.1",
       "bind_port=6449",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -2148,53 +2179,58 @@ TEST_F(CreateConfigGeneratorTest, create_config_disable_rest) {
       "[DEFAULT]",
       "name=myrouter",
       "user=mysqlrouter",
-      "connect_timeout=" + kDefaultConnectTimeout,
-      "read_timeout=" + kDefaultReadTimeout,
+      "connect_timeout=5",
+      "read_timeout=30",
       "dynamic_state=state_file_name.json",
       "client_ssl_cert=" + tmp_path.join("router-cert.pem").str(),
       "client_ssl_key=" + tmp_path.join("router-key.pem").str(),
       "client_ssl_mode=PREFERRED",
       "server_ssl_mode=AS_CLIENT",
       "server_ssl_verify=DISABLED",
+      "unknown_config_option=error",
       "",
       "[logger]",
       "level=INFO",
       "",
-      "[metadata_cache:mycluster]",
+      "[metadata_cache:bootstrap]",
       "cluster_type=gr",
       "router_id=123",
       "user=cluster_user",
-      "metadata_cluster=mycluster",
+      "metadata_cluster=my-cluster",
       "ttl=0.5",
       "auth_cache_ttl=-1",
       "auth_cache_refresh_interval=2",
       "use_gr_notifications=0",
       "",
-      "[routing:mycluster_rw]",
+      "[routing:bootstrap_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6446",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=classic",
       "",
-      "[routing:mycluster_ro]",
+      "[routing:bootstrap_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6447",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=classic",
       "",
-      "[routing:mycluster_x_rw]",
+      "[routing:bootstrap_x_rw]",
       "bind_address=0.0.0.0",
       "bind_port=6448",
-      "destinations=metadata-cache://mycluster/?role=PRIMARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=PRIMARY",
       "routing_strategy=first-available",
       "protocol=x",
       "",
-      "[routing:mycluster_x_ro]",
+      "[routing:bootstrap_x_ro]",
       "bind_address=0.0.0.0",
       "bind_port=6449",
-      "destinations=metadata-cache://mycluster/?role=SECONDARY",
+      "destinations=metadata-cache://my-cluster/"
+      "?role=SECONDARY",
       "routing_strategy=round-robin-with-fallback",
       "protocol=x",
       ""};
@@ -2475,7 +2511,8 @@ static void expect_bootstrap_queries(
     MySQLSessionReplayer *m, const char *cluster_name,
     const std::vector<query_entry_t> &expected_queries =
         expected_bootstrap_queries) {
-  m->expect_query("").then_return(3, {{"id", cluster_name, "somehost:3306"}});
+  m->expect_query("").then_return(
+      3, {{"91d0107263cd11ec9a29080027ac264d", cluster_name, "somehost:3306"}});
   for (const auto &query : expected_queries) {
     switch (query.action) {
       case ACTION_EXECUTE:
@@ -2504,7 +2541,7 @@ static void bootstrap_name_test(
   ConfigGenerator config_gen;
   common_pass_metadata_checks(mock_mysql);
   config_gen.init(kServerUrl, {});
-  if (!expect_fail) expect_bootstrap_queries(mock_mysql, "mycluster");
+  if (!expect_fail) expect_bootstrap_queries(mock_mysql, "my-cluster");
 
   std::map<std::string, std::string> options;
   options["name"] = name;
@@ -2589,7 +2626,8 @@ TEST_F(ConfigGeneratorTest, bootstrap_cleanup_on_failure) {
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
     mock_mysql->expect_query("select c.cluster_id")
-        .then_return(3, {{"id", "mycluter", "somehost:3306"}});
+        .then_return(3, {{"91d0107263cd11ec9a29080027ac264d", "my-cluster",
+                          "somehost:3306"}});
     common_pass_group_name(mock_mysql.get());
     mock_mysql->expect_execute("START TRANSACTION").then_error("boo!", 1234);
 
@@ -2611,7 +2649,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_cleanup_on_failure) {
     ConfigGenerator config_gen;
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
-    expect_bootstrap_queries(mock_mysql.get(), "mycluster");
+    expect_bootstrap_queries(mock_mysql.get(), "my-cluster");
 
     KeyringInfo keyring_info("delme", "delme.key");
     config_gen.set_keyring_info(keyring_info);
@@ -2630,9 +2668,10 @@ TEST_F(ConfigGeneratorTest, bootstrap_cleanup_on_failure) {
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
     mock_mysql->expect_query("").then_return(
-        3, {{"id", "mycluster", "somehost:3306"}});
+        3,
+        {{"91d0107263cd11ec9a29080027ac264d", "my-cluster", "somehost:3306"}});
     common_pass_group_name(mock_mysql.get());
-    // force a failure during account creationg
+    // force a failure during account creation
     mock_mysql->expect_execute("").then_error("boo!", 1234);
 
     KeyringInfo keyring_info("delme", "delme.key");
@@ -2653,7 +2692,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_cleanup_on_failure) {
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
     mock_mysql->expect_query("").then_return(
-        3, {{"id", "mycluter", "somehost:3306"}});
+        3, {{"91d0107263cd11ec9a29080027ac264d", "mycluter", "somehost:3306"}});
 
     std::map<std::string, std::string> options2 = options;
     options2["name"] = "force\nfailure";
@@ -2678,10 +2717,11 @@ TEST_F(ConfigGeneratorTest, bug25391460) {
   {
     ConfigGenerator config_gen;
     common_pass_metadata_checks(mock_mysql.get());
-    expect_bootstrap_queries(mock_mysql.get(), "mycluster");
+    expect_bootstrap_queries(mock_mysql.get(), "my-cluster");
     config_gen.init(kServerUrl, {});
     mock_mysql->expect_query("").then_return(
-        3, {{"id", "mycluster", "somehost:3306"}});
+        3,
+        {{"91d0107263cd11ec9a29080027ac264d", "my-cluster", "somehost:3306"}});
 
     std::map<std::string, std::string> options;
     options["quiet"] = "1";
@@ -2738,7 +2778,8 @@ static void bootstrap_overwrite_test(
     expect_bootstrap_queries(mock_mysql, cluster_name);
   else
     mock_mysql->expect_query("").then_return(
-        3, {{"id", cluster_name, "somehost:3306"}});
+        3,
+        {{"91d0107263cd11ec9a29080027ac264d", cluster_name, "somehost:3306"}});
 
   std::map<std::string, std::string> options;
   options["name"] = name;
@@ -2901,7 +2942,7 @@ static void test_key_length(
   ConfigGenerator config_gen;
   common_pass_metadata_checks(mock_mysql);
   config_gen.init(kServerUrl, {});
-  expect_bootstrap_queries(mock_mysql, "mycluster");
+  expect_bootstrap_queries(mock_mysql, "my-cluster");
 
   std::map<std::string, std::string> options;
   options["name"] = "test";
@@ -2963,7 +3004,7 @@ TEST_F(ConfigGeneratorTest, bad_master_key) {
     ConfigGenerator config_gen;
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
-    expect_bootstrap_queries(mock_mysql.get(), "mycluster");
+    expect_bootstrap_queries(mock_mysql.get(), "my-cluster");
 
     KeyringInfo keyring_info("delme", "key");
     config_gen.set_keyring_info(keyring_info);
@@ -2982,7 +3023,7 @@ TEST_F(ConfigGeneratorTest, bad_master_key) {
     ConfigGenerator config_gen;
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
-    expect_bootstrap_queries(mock_mysql.get(), "mycluster");
+    expect_bootstrap_queries(mock_mysql.get(), "my-cluster");
 
     KeyringInfo keyring_info(test_dir.name(), "emptyfile");
     config_gen.set_keyring_info(keyring_info);
@@ -3005,7 +3046,7 @@ TEST_F(ConfigGeneratorTest, bad_master_key) {
     ConfigGenerator config_gen;
     common_pass_metadata_checks(mock_mysql.get());
     config_gen.init(kServerUrl, {});
-    expect_bootstrap_queries(mock_mysql.get(), "mycluster");
+    expect_bootstrap_queries(mock_mysql.get(), "my-cluster");
 
     KeyringInfo keyring_info(test_dir.name(), ".");
     config_gen.set_keyring_info(keyring_info);
@@ -3025,7 +3066,7 @@ TEST_F(ConfigGeneratorTest, full_test) {
   ConfigGenerator config_gen;
   common_pass_metadata_checks(mock_mysql.get());
   config_gen.init(kServerUrl, {});
-  expect_bootstrap_queries(mock_mysql.get(), "mycluster");
+  expect_bootstrap_queries(mock_mysql.get(), "my-cluster");
 
   std::map<std::string, std::string> options;
   options["name"] = "foo";
@@ -3117,7 +3158,8 @@ TEST_F(ConfigGeneratorTest, ssl_stage1_cmdline_arg_parse) {
         FAIL() << "Expected std::invalid_argument to be thrown";
       } catch (const std::runtime_error &e) {
         if (opt == "--ssl-mode") {
-          // The error for -ssl-mode is sligtly different than for other options
+          // The error for -ssl-mode is slightly different than for other
+          // options
           // - detected differently
           EXPECT_STREQ("Invalid value for --ssl-mode option", e.what());
         } else {
@@ -3352,7 +3394,7 @@ TEST_F(ConfigGeneratorTest, ssl_stage3_create_config) {
             config_gen.fill_options(user_options, default_paths, {});
         std::stringstream conf_output, state_output;
         mysqlrouter::ClusterInfo cluster_info{
-            {"server1", "server2", "server3"}, "", "gr_id", "mycluster"};
+            {"server1", "server2", "server3"}, "", "gr_id", "my-cluster"};
         config_gen.create_config(conf_output, state_output, 123, "myrouter",
                                  "user", cluster_info, "cluster_user", options,
                                  default_paths, {});
@@ -3607,7 +3649,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_from_uri_unixsocket) {
   });
 }
 
-// a invalid URI (port too large) should trigger a expection
+// a invalid URI (port too large) should trigger an exception
 TEST_F(ConfigGeneratorTest, bootstrap_from_invalid_uri) {
   mysqlrouter::set_prompt_password(
       [](const std::string &) -> std::string { return ""; });
@@ -3669,7 +3711,7 @@ static void bootstrap_password_test(
   ::testing::InSequence s;
   common_pass_metadata_checks(mysql);
   config_gen.init(kServerUrl, {});
-  expect_bootstrap_queries(mysql, "mycluster", bootstrap_queries);
+  expect_bootstrap_queries(mysql, "my-cluster", bootstrap_queries);
 
   std::map<std::string, std::string> options;
   options["name"] = "name";
@@ -3696,7 +3738,7 @@ TEST_F(ConfigGeneratorTest,
        bootstrap_generate_password_force_password_validation) {
   const std::string kDirName = "./gen_pass_test";
 
-  // copy expected bootstrap queries brefore CREATE USER
+  // copy expected bootstrap queries before CREATE USER
   std::vector<query_entry_t> bootstrap_queries;
   for (unsigned i = 0; i < kCreateUserQuery; ++i) {
     bootstrap_queries.push_back(expected_bootstrap_queries.at(i));
@@ -3729,7 +3771,7 @@ TEST_F(ConfigGeneratorTest,
 TEST_F(ConfigGeneratorTest, bootstrap_generate_password_no_native_plugin) {
   const std::string kDirName = "./gen_pass_test";
 
-  // copy expected bootstrap queries brefore CREATE USER
+  // copy expected bootstrap queries before CREATE USER
   std::vector<query_entry_t> bootstrap_queries;
   for (unsigned i = 0; i < kCreateUserQuery; ++i) {
     bootstrap_queries.push_back(expected_bootstrap_queries.at(i));
@@ -3741,7 +3783,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_no_native_plugin) {
        " IDENTIFIED WITH mysql_native_password AS",
        ACTION_ERROR, 0, 1524});
 
-  // that should lead to rollback and retry witout hashed password
+  // that should lead to rollback and retry without hashed password
   bootstrap_queries.push_back({"ROLLBACK", ACTION_EXECUTE});
 
   bootstrap_queries.push_back(
@@ -3768,7 +3810,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_no_native_plugin) {
 TEST_F(ConfigGeneratorTest, bootstrap_generate_password_with_native_plugin) {
   const std::string kDirName = "./gen_pass_test";
 
-  // copy expected bootstrap queries brefore CREATE USER
+  // copy expected bootstrap queries before CREATE USER
   std::vector<query_entry_t> bootstrap_queries;
   for (unsigned i = 0; i < kCreateUserQuery; ++i) {
     bootstrap_queries.push_back(expected_bootstrap_queries.at(i));
@@ -3800,7 +3842,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_with_native_plugin) {
 TEST_F(ConfigGeneratorTest, bootstrap_generate_password_retry_ok) {
   const std::string kDirName = "./gen_pass_test";
 
-  // copy expected bootstrap queries brefore CREATE USER
+  // copy expected bootstrap queries before CREATE USER
   std::vector<query_entry_t> bootstrap_queries;
   for (unsigned i = 0; i < kCreateUserQuery; ++i) {
     bootstrap_queries.push_back(expected_bootstrap_queries.at(i));
@@ -3812,7 +3854,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_retry_ok) {
        " IDENTIFIED WITH mysql_native_password AS",
        ACTION_ERROR, 0, 1524});
 
-  // that should lead to rollback and retry witout hashed password
+  // that should lead to rollback and retry without hashed password
   bootstrap_queries.push_back({"ROLLBACK", ACTION_EXECUTE});
 
   // emulate error 1819) (password does not satisfy the current policy
@@ -3822,7 +3864,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_retry_ok) {
        " IDENTIFIED BY",
        ACTION_ERROR, 0, 1819});
 
-  // that should lead to rollback and another retry witout hashed password
+  // that should lead to rollback and another retry without hashed password
   bootstrap_queries.push_back({"ROLLBACK", ACTION_EXECUTE});
 
   bootstrap_queries.push_back(
@@ -3850,7 +3892,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_retry_failed) {
   const std::string kDirName = "./gen_pass_test";
   const unsigned kPasswordRetries = 3;
 
-  // copy expected bootstrap queries brefore CREATE USER
+  // copy expected bootstrap queries before CREATE USER
   std::vector<query_entry_t> bootstrap_queries;
   for (unsigned i = 0; i < kCreateUserQuery; ++i) {
     bootstrap_queries.push_back(expected_bootstrap_queries.at(i));
@@ -3862,7 +3904,7 @@ TEST_F(ConfigGeneratorTest, bootstrap_generate_password_retry_failed) {
        " IDENTIFIED WITH mysql_native_password AS",
        ACTION_ERROR, 0, 1524});
 
-  // that should lead to rollback and retry witout hashed password for
+  // that should lead to rollback and retry without hashed password for
   // "kPasswordRetries" number of times
   for (unsigned i = 0; i < kPasswordRetries; ++i) {
     bootstrap_queries.push_back({"ROLLBACK", ACTION_EXECUTE});

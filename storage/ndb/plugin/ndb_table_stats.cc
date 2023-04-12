@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2021, Oracle and/or its affiliates.
+   Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -72,7 +72,7 @@ bool ndb_get_table_statistics(THD *thd, Ndb *ndb,
   int retries = 100;
   NdbTransaction *trans;
   do {
-    Uint32 count = 0;
+    Uint32 count [[maybe_unused]] = 0;
     Uint64 sum_rows = 0;
     Uint64 sum_row_size = 0;
     Uint64 sum_mem = 0;
@@ -90,7 +90,7 @@ bool ndb_get_table_statistics(THD *thd, Ndb *ndb,
     options.optionsPresent = NdbScanOperation::ScanOptions::SO_BATCH |
                              NdbScanOperation::ScanOptions::SO_GETVALUE |
                              NdbScanOperation::ScanOptions::SO_INTERPRETED;
-    /* Set batch_size=1, as we need only one row per fragment. */
+    /* Set batch=1, as we need only one row per fragment. */
     options.batch = 1;
     options.extraGetValues = &extraGets[0];
     options.numExtraGetValues = sizeof(extraGets) / sizeof(extraGets[0]);
@@ -199,12 +199,24 @@ bool ndb_get_table_commit_count(Ndb *ndb, const NdbDictionary::Table *ndbtab,
   int retries = 100;
   NdbTransaction *trans;
   do {
+    /**
+     * Allocate an isolated Ndb object for this scan due to bug#34768887
+     * Will be released on leaving scope / iterating loop
+     */
+    Ndb isolNdb(&ndb->get_ndb_cluster_connection());
+    if (isolNdb.init() != 0) {
+      DBUG_PRINT("info", ("Failed to init Ndb object : %u",
+                          isolNdb.getNdbError().code));
+      ndb_error = isolNdb.getNdbError();
+      return true;  // Error
+    }
+
     Uint64 total_commit_count = 0;
     NdbScanOperation *op;
     int check;
 
-    if ((trans = ndb->startTransaction(ndbtab)) == nullptr) {
-      ndb_error = ndb->getNdbError();
+    if ((trans = isolNdb.startTransaction(ndbtab)) == nullptr) {
+      ndb_error = isolNdb.getNdbError();
       goto retry;
     }
 
@@ -212,7 +224,7 @@ bool ndb_get_table_commit_count(Ndb *ndb, const NdbDictionary::Table *ndbtab,
     options.optionsPresent = NdbScanOperation::ScanOptions::SO_BATCH |
                              NdbScanOperation::ScanOptions::SO_GETVALUE |
                              NdbScanOperation::ScanOptions::SO_INTERPRETED;
-    /* Set batch_size=1, as we need only one row per fragment. */
+    /* Set batch=1, as we need only one row per fragment. */
     options.batch = 1;
     options.extraGetValues = &extraGets[0];
     options.numExtraGetValues = sizeof(extraGets) / sizeof(extraGets[0]);
@@ -223,8 +235,9 @@ bool ndb_get_table_commit_count(Ndb *ndb, const NdbDictionary::Table *ndbtab,
     if ((op = trans->scanTable(
              ndbtab->getDefaultRecord(),  // Record not used since there are no
                                           // real columns in the scan
-             NdbOperation::LM_CommittedRead, empty_mask, &options,
-             sizeof(NdbScanOperation::ScanOptions))) == nullptr) {
+             NdbOperation::LM_Read,       // LM_Read to control which replicas
+             empty_mask, &options, sizeof(NdbScanOperation::ScanOptions))) ==
+        nullptr) {
       ndb_error = trans->getNdbError();
       goto retry;
     }
@@ -246,13 +259,16 @@ bool ndb_get_table_commit_count(Ndb *ndb, const NdbDictionary::Table *ndbtab,
       goto retry;
     }
     op->close(true);
-    ndb->closeTransaction(trans);
+    isolNdb.closeTransaction(trans);
     *commit_count = total_commit_count;
+    DBUG_PRINT("info",
+               ("Returning false with commit count %llu", total_commit_count));
     return false;  // Success
 
   retry:
+    DBUG_PRINT("info", ("Temp error : %u", ndb_error.code));
     if (trans != nullptr) {
-      ndb->closeTransaction(trans);
+      isolNdb.closeTransaction(trans);
       trans = nullptr;
     }
     if (ndb_error.status == NdbError::TemporaryError && retries--) {

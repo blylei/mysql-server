@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021, Oracle and/or its affiliates.
+  Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -120,7 +120,7 @@ using LocalAllocated = std::unique_ptr<T, LocalDeleter>;
  * - allocate and free
  *
  * Uses LocalFree() to free its owned memory which makes it suitable
- * win32 APIs which explict "must be freed with LocalFree()".
+ * win32 APIs which explicitly "must be freed with LocalFree()".
  */
 template <class T>
 class Allocated {
@@ -247,17 +247,20 @@ class HARNESS_EXPORT Acl {
 
   class HARNESS_EXPORT iterator {
    public:
-    using reference_type = Ace;
+    using value_type = Ace;
+    using reference = value_type &;
 
     iterator(ACL *acl, size_t ndx) : acl_{acl}, ndx_{ndx} {}
 
-    reference_type operator*();
+    reference operator*();
     iterator &operator++();
-    bool operator!=(const iterator &other);
+    bool operator!=(const iterator &other) const;
 
    private:
     ACL *acl_;
     size_t ndx_;
+
+    value_type ace_{nullptr};
   };
 
   iterator begin() const { return {acl_, 0}; }

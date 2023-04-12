@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -159,7 +159,7 @@ class Histogram_sampler {
   /** The parallel reader. */
   Parallel_reader m_parallel_reader;
 
-  /** Random generator engine used to provide us random uniformly distrubuted
+  /** Random generator engine used to provide us random uniformly distributed
   values required to decide if the row in question needs to be sampled or
   not. */
   std::mt19937 m_random_generator;

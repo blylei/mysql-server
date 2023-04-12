@@ -1,4 +1,4 @@
-/* Copyright (c) 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -27,8 +27,8 @@ bool Perfschema_module::register_pfs_tables(Pfs_tables &tables) {
   Registry_guard guard;
   if (guard.get_registry() == nullptr) return true;
 
-  my_service<SERVICE_TYPE(pfs_plugin_table)> reg("pfs_plugin_table",
-                                                 guard.get_registry());
+  my_service<SERVICE_TYPE(pfs_plugin_table_v1)> reg("pfs_plugin_table_v1",
+                                                    guard.get_registry());
   std::vector<PFS_engine_table_share_proxy *> shares;
 
   for (auto &table : tables) shares.push_back(table->get_share());
@@ -43,8 +43,8 @@ bool Perfschema_module::unregister_pfs_tables(Pfs_tables &tables) {
   Registry_guard guard;
   if (guard.get_registry() == nullptr) return true;
 
-  my_service<SERVICE_TYPE(pfs_plugin_table)> reg("pfs_plugin_table",
-                                                 guard.get_registry());
+  my_service<SERVICE_TYPE(pfs_plugin_table_v1)> reg("pfs_plugin_table_v1",
+                                                    guard.get_registry());
   std::vector<PFS_engine_table_share_proxy *> shares;
 
   for (auto &table : tables) shares.push_back(table->get_share());

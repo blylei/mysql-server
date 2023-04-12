@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -34,6 +34,7 @@
 #include <gmock/gmock.h>
 
 #include "mock_metadata.h"
+#include "mock_metadata_factory.h"
 #include "mysqlrouter/cluster_metadata.h"
 #include "mysqlrouter/metadata_cache.h"
 #include "tcp_address.h"
@@ -70,6 +71,10 @@ class MetadataCachePluginTest : public ::testing::Test {
 
   void SetUp() override {
     std::vector<ManagedInstance> instance_vector_1;
+
+    metadata_cache::MetadataCacheAPI::instance()->set_instance_factory(
+        &mock_metadata_factory_get_instance);
+
     metadata_cache::MetadataCacheAPI::instance()->cache_init(
         mysqlrouter::ClusterType::GR_V1, kRouterId, replication_group_id, "",
         metadata_server_vector,
@@ -88,7 +93,7 @@ class MetadataCachePluginTest : public ::testing::Test {
      */
     while (instance_vector_1.size() != 3) {
       try {
-        instance_vector_1 = cache_api_->get_cluster_nodes().instance_vector;
+        instance_vector_1 = cache_api_->get_cluster_nodes();
       } catch (const std::runtime_error &exc) {
         /**
          * If the lookup fails after 5 attempts it points to an error
@@ -116,7 +121,7 @@ class MetadataCachePluginTest : public ::testing::Test {
  */
 TEST_F(MetadataCachePluginTest, ValidCluserTest_1) {
   std::vector<ManagedInstance> instance_vector_1 =
-      cache_api_->get_cluster_nodes().instance_vector;
+      cache_api_->get_cluster_nodes();
 
   EXPECT_EQ(instance_vector_1[0], mf.ms1);
   EXPECT_EQ(instance_vector_1[1], mf.ms2);
@@ -125,6 +130,7 @@ TEST_F(MetadataCachePluginTest, ValidCluserTest_1) {
 
 int main(int argc, char *argv[]) {
   init_test_logger();
+
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

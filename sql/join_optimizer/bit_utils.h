@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -221,11 +221,21 @@ MY_COMPILER_DIAGNOSTIC_POP()
 // Returns whether X is a subset of Y.
 inline bool IsSubset(uint64_t x, uint64_t y) { return (x & y) == x; }
 
+/// Returns whether X is a proper subset of Y.
+inline bool IsProperSubset(uint64_t x, uint64_t y) {
+  return IsSubset(x, y) && x != y;
+}
+
 // Returns whether X and Y overlap. Symmetric.
 inline bool Overlaps(uint64_t x, uint64_t y) { return (x & y) != 0; }
 
-// Returns whether X is a power of two.
-inline bool IsSingleBitSet(uint64_t x) { return (x & (x - 1)) == 0; }
+// Returns whether X has more than one bit set.
+inline bool AreMultipleBitsSet(uint64_t x) { return (x & (x - 1)) != 0; }
+
+// Returns whether X has exactly one bit set.
+inline bool IsSingleBitSet(uint64_t x) {
+  return x != 0 && !AreMultipleBitsSet(x);
+}
 
 // Returns whether the given bit is set in X.
 inline bool IsBitSet(int bit_num, uint64_t x) {

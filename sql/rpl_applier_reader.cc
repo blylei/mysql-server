@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -119,7 +119,7 @@ bool Rpl_applier_reader::open(const char **errmsg) {
        group_relay_log_name may be different from the one in index file. For
        example group_relay_log_name includes a full path. But the one in index
        file has relative path. So set group_relay_log_name to the one in index
-       file. It guarantes MYSQL_BIN_LOG::purge works well.
+       file. It guarantees MYSQL_BIN_LOG::purge works well.
     */
     rli->set_group_relay_log_name(m_linfo.log_file_name);
     rli->set_event_relay_log_pos(rli->get_group_relay_log_pos());
@@ -288,13 +288,13 @@ bool Rpl_applier_reader::wait_for_new_event() {
   if (m_rli->is_parallel_exec() &&
       (opt_mta_checkpoint_period != 0 ||
        DBUG_EVALUATE_IF("check_replica_debug_group", 1, 0))) {
-    struct timespec waittime;
-    set_timespec_nsec(&waittime, opt_mta_checkpoint_period * 1000000ULL);
+    std::chrono::nanoseconds timeout =
+        std::chrono::nanoseconds{opt_mta_checkpoint_period * 1000000ULL};
     DBUG_EXECUTE_IF("check_replica_debug_group",
-                    { set_timespec_nsec(&waittime, 10000000); });
-    ret = m_rli->relay_log.wait_for_update(&waittime);
+                    { timeout = std::chrono::nanoseconds{10000000}; });
+    ret = m_rli->relay_log.wait_for_update(timeout);
   } else
-    ret = m_rli->relay_log.wait_for_update(nullptr);
+    ret = m_rli->relay_log.wait_for_update();
 
   // re-acquire data lock since we released it earlier
   mysql_mutex_lock(&m_rli->data_lock);
@@ -548,12 +548,12 @@ void Rpl_applier_reader::reset_seconds_behind_master() {
     exist until SQL finishes executing the new event; it will be look abnormal
     only if the events have old timestamps (then you get "many", 0, "many").
 
-    Transient phases like this can be fixed with implemeting Heartbeat event
+    Transient phases like this can be fixed with implementing Heartbeat event
     which provides the slave the status of the master at time the master does
     not have any new update to send. Seconds_Behind_Master would be zero only
     when master has no more updates in binlog for slave. The heartbeat can be
     sent in a (small) fraction of replica_net_timeout. Until it's done
-    m_rli->last_master_timestamp is temporarely (for time of waiting for the
+    m_rli->last_master_timestamp is temporarily (for time of waiting for the
     following event) reset whenever EOF is reached.
 
     Note, in MTS case Seconds_Behind_Master resetting follows

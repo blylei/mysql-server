@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,12 +29,14 @@
 
 #include "my_sys.h"
 #include "my_thread.h"
+#include "sql/binlog/group_commit/bgc_ticket_manager.h"
 #include "sql/binlog_ostream.h"
 #include "sql/binlog_reader.h"
 #include "sql/debug_sync.h"
 #include "sql/log_event.h"
 #include "sql/replication.h"
 #include "sql/rpl_channel_service_interface.h"
+#include "sql/rpl_commit_stage_manager.h"
 #include "sql/rpl_gtid.h"
 #include "sql/rpl_write_set_handler.h"
 

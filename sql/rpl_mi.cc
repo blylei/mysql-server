@@ -1,4 +1,4 @@
-/* Copyright (c) 2006, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2006, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,8 +32,8 @@
 #include "my_dbug.h"
 #include "my_loglevel.h"
 #include "my_sys.h"
+#include "mysql/components/services/bits/psi_stage_bits.h"
 #include "mysql/components/services/log_builtins.h"
-#include "mysql/components/services/psi_stage_bits.h"
 #include "mysql_version.h"
 #include "mysqld_error.h"
 #include "prealloced_array.h"
@@ -112,7 +112,7 @@ enum {
 };
 
 /*
-  Please every time you add a new field to the mater info, update
+  Please every time you add a new field to the master info, update
   what follows. For now, this is just used to get the number of
   fields.
 */
@@ -222,10 +222,7 @@ Master_info::Master_info(
   ignore_server_ids = new Server_ids;
   strcpy(compression_algorithm, COMPRESSION_ALGORITHM_UNCOMPRESSED);
   zstd_compression_level = default_zstd_compression_level;
-  server_extn.m_user_data = nullptr;
-  server_extn.m_before_header = nullptr;
-  server_extn.m_after_header = nullptr;
-  server_extn.compress_ctx.algorithm = MYSQL_UNCOMPRESSED;
+  net_server_ext_init(&server_extn);
   gtid_monitoring_info = new Gtid_monitoring_info(&data_lock);
 
   mysql_mutex_init(*key_info_rotate_lock, &this->rotate_lock,

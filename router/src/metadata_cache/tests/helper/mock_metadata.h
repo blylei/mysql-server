@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -30,34 +30,20 @@
 
 #include "tcp_address.h"
 
-#ifdef _WIN32
-#ifdef metadata_cache_tests_DEFINE_STATIC
-#define METADATA_TESTS_API
-#else
-#ifdef metadata_cache_tests_EXPORTS
-#define METADATA_TESTS_API __declspec(dllexport)
-#else
-#define METADATA_TESTS_API __declspec(dllimport)
-#endif
-#endif
-#else
-#define METADATA_TESTS_API
-#endif
-
 /** @class MockNG
  *
  * Used for simulating NG metadata for testing purposes.
  *
  */
 
-class METADATA_TESTS_API MockNG : public GRClusterMetadata {
+class MockNG : public GRClusterMetadata {
  public:
   /**
    * Objects representing the servers that are part of the topology.
    */
-  metadata_cache::ManagedInstance ms1;
-  metadata_cache::ManagedInstance ms2;
-  metadata_cache::ManagedInstance ms3;
+  metadata_cache::ManagedInstance ms1{GR};
+  metadata_cache::ManagedInstance ms2{GR};
+  metadata_cache::ManagedInstance ms3{GR};
 
   /**
    * Server list for the cluster. Each server object
@@ -69,7 +55,7 @@ class METADATA_TESTS_API MockNG : public GRClusterMetadata {
   /**
    * The information about the HA topology being managed.
    */
-  metadata_cache::ManagedCluster cluster_info;
+  metadata_cache::ClusterTopology cluster_topology;
 
   metadata_cache::metadata_servers_list_t metadata_servers;
 
@@ -118,7 +104,8 @@ class METADATA_TESTS_API MockNG : public GRClusterMetadata {
       mysqlrouter::TargetCluster &target_cluster, const unsigned /*router_id*/,
       const metadata_cache::metadata_servers_list_t &metadata_servers,
       bool needs_writable_node, const std::string &group_replication_id,
-      const std::string &clusterset_id, size_t &instance_id) override;
+      const std::string &clusterset_id, bool whole_topology,
+      size_t &instance_id) override;
 
 #if 0  // not used so far
   /**
@@ -129,6 +116,8 @@ class METADATA_TESTS_API MockNG : public GRClusterMetadata {
    */
   unsigned int fetch_ttl() override;
 #endif
+ private:
+  static constexpr auto GR = metadata_cache::InstanceType::GroupMember;
 };
 
 #endif  // MOCK_METADATA_INCLUDED

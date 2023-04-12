@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -393,7 +393,7 @@ bool Gcs_xcom_nodes::encode(unsigned int *ptr_size, char const ***ptr_addrs,
   m_uuids = static_cast<blob *>(std::calloc(m_size, sizeof(blob)));
 
   /*
-    If memory was not successfuly allocated, an error is
+    If memory was not successfully allocated, an error is
     reported.
   */
   if ((m_addrs == nullptr) || (m_uuids == nullptr)) {

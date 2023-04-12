@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -355,7 +355,7 @@ void MySQLSession::execute(const std::string &q) {
   Execute query on the session and iterate the results with the given
   callback.
 
-  The processor callback is called with a vector of strings, which conain the
+  The processor callback is called with a vector of strings, which contain the
   values of each field of a row. It is called once per row.
   If the processor returns false, the result row iteration stops.
  */

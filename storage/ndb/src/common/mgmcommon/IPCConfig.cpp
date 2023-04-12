@@ -1,5 +1,5 @@
 /* 
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include <ndb_global.h>
 
 #include <cstring>
@@ -114,7 +115,7 @@ IPCConfig::configureTransporters(Uint32 nodeId,
     
     std::memset(&conf, 0, sizeof(conf));
     Uint32 nodeId1, nodeId2, remoteNodeId;
-    const char * remoteHostName= 0, * localHostName= 0;
+    const char * remoteHostName= nullptr, * localHostName= nullptr;
     if(iter.get(CFG_CONNECTION_NODE_1, &nodeId1)) continue;
     if(iter.get(CFG_CONNECTION_NODE_2, &nodeId2)) continue;
 
@@ -127,7 +128,7 @@ IPCConfig::configureTransporters(Uint32 nodeId,
     }
 
     {
-      const char * host1= 0, * host2= 0;
+      const char * host1= nullptr, * host2= nullptr;
       iter.get(CFG_CONNECTION_HOSTNAME_1, &host1);
       iter.get(CFG_CONNECTION_HOSTNAME_2, &host2);
       localHostName  = (nodeId == nodeId1 ? host1 : host2);

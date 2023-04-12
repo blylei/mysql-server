@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2012, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -138,7 +138,7 @@ static void dictionary_activate(set_type *dict_words) {
   char *new_ts;
 
   /* fetch the start time */
-  start_time = my_time(MYF(0));
+  start_time = time(nullptr);
   localtime_r(&start_time, &tm);
   snprintf(timebuf, sizeof(timebuf), "%04d-%02d-%02d %02d:%02d:%02d",
            tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
@@ -220,8 +220,8 @@ static int validate_dictionary_check(mysql_string_handle password) {
   mysql_string_handle lower_string_handle = mysql_string_to_lowercase(password);
   if (!(buffer = (char *)malloc(MAX_PASSWORD_LENGTH))) return (0);
 
-  length = mysql_string_convert_to_char_ptr(lower_string_handle, "utf8", buffer,
-                                            MAX_PASSWORD_LENGTH, &error);
+  length = mysql_string_convert_to_char_ptr(
+      lower_string_handle, "utf8mb3", buffer, MAX_PASSWORD_LENGTH, &error);
   /* Free the allocated string */
   mysql_string_free(lower_string_handle);
   int substr_pos = 0;
@@ -342,7 +342,7 @@ static bool is_valid_password_by_user_name(mysql_string_handle password) {
     return false;
   }
 
-  length = mysql_string_convert_to_char_ptr(password, "utf8", buffer,
+  length = mysql_string_convert_to_char_ptr(password, "utf8mb3", buffer,
                                             MAX_PASSWORD_LENGTH, &error);
 
   return is_valid_user(ctx, buffer, length, "user", "login user name") &&

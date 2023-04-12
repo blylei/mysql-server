@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -150,7 +150,7 @@
    ZSIZE_OF_PAGES_IN_WORDS)
 
 /**
- * - one for retreive
+ * - one for retrieve
  * - one for read or write
  */
 #define ZNUMBER_OF_PAGES (2 * ZMAX_PAGES_OF_TABLE_DEFINITION)
@@ -318,7 +318,7 @@ public:
     Uint8 m_extra_row_author_bits;
     Uint16 m_bits;
 
-    /* Number of attibutes in table */
+    /* Number of attributes in table */
     Uint16 noOfAttributes;
 
     /* Number of null attributes in table (should be computed) */
@@ -786,8 +786,7 @@ public:
       object.setNull();
       return false;
     }
-    get_pool(object).getPtr(object, obj.p->m_object_ptr_i);
-    return !object.isNull();
+    return get_pool(object).getPtr(object, obj.p->m_object_ptr_i);
   }
 
   template<typename T> bool find_object(Ptr<T>& object, Uint32 id)
@@ -803,15 +802,14 @@ public:
       object.setNull();
       return false;
     }
-    get_pool(object).getPtr(object, obj.p->m_object_ptr_i);
-    return !object.isNull();
+    return get_pool(object).getPtr(object, obj.p->m_object_ptr_i);
   }
 
   bool find_object(DictObjectPtr& object, Uint32 id)
   {
     DictObject key;
     key.m_id = id;
-    key.m_type = 0; // Not a trigger atleast
+    key.m_type = 0; // Not a trigger at least
     bool ok = c_obj_id_hash.find(object, key);
     return ok;
   }
@@ -2120,16 +2118,20 @@ private:
 
   // seize / find / release, atomic on op rec + data rec
 
-  bool seizeSchemaOp(SchemaTransPtr trans_ptr, SchemaOpPtr& op_ptr, Uint32 op_key, const OpInfo& info, bool linked=false);
+  [[nodiscard]] bool seizeSchemaOp(SchemaTransPtr trans_ptr,
+                                   SchemaOpPtr& op_ptr,
+                                   Uint32 op_key,
+                                   const OpInfo& info,
+                                   bool linked = false);
 
   template <class T>
-  inline bool
+  [[nodiscard]] inline bool
   seizeSchemaOp(SchemaTransPtr trans_ptr, SchemaOpPtr& op_ptr, Uint32 op_key, bool linked) {
     return seizeSchemaOp(trans_ptr, op_ptr, op_key, T::g_opInfo, linked);
   }
 
   template <class T>
-  inline bool
+  [[nodiscard]] inline bool
   seizeSchemaOp(SchemaTransPtr trans_ptr, SchemaOpPtr& op_ptr, Ptr<T>& t_ptr, Uint32 op_key) {
     if (seizeSchemaOp<T>(trans_ptr, op_ptr, op_key)) {
       getOpRec<T>(op_ptr, t_ptr);
@@ -2139,7 +2141,7 @@ private:
   }
 
   template <class T>
-  inline bool
+  [[nodiscard]] inline bool
   seizeSchemaOp(SchemaTransPtr trans_ptr, SchemaOpPtr& op_ptr, bool linked) {
     /*
       Store node id in high 8 bits to make op_key globally unique
@@ -2155,7 +2157,7 @@ private:
   }
 
   template <class T>
-  inline bool
+  [[nodiscard]] inline bool
   seizeSchemaOp(SchemaTransPtr trans_ptr, SchemaOpPtr& op_ptr, Ptr<T>& t_ptr, bool linked=false) {
     if (seizeSchemaOp<T>(trans_ptr, op_ptr, linked)) {
       getOpRec<T>(op_ptr, t_ptr);
@@ -2165,7 +2167,7 @@ private:
   }
 
   template <class T>
-  inline bool
+  [[nodiscard]] inline bool
   seizeLinkedSchemaOp(SchemaOpPtr op_ptr, SchemaOpPtr& oplnk_ptr, Ptr<T>& t_ptr) {
     ndbrequire(op_ptr.p->m_oplnk_ptr.isNull());
     if (seizeSchemaOp<T>(op_ptr.p->m_trans_ptr, oplnk_ptr, true)) {
@@ -2178,10 +2180,10 @@ private:
     return false;
   }
 
-  bool findSchemaOp(SchemaOpPtr& op_ptr, Uint32 op_key);
+  [[nodiscard]] bool findSchemaOp(SchemaOpPtr& op_ptr, Uint32 op_key);
 
   template <class T>
-  inline bool
+  [[nodiscard]] inline bool
   findSchemaOp(SchemaOpPtr& op_ptr, Ptr<T>& t_ptr, Uint32 op_key) {
     if (findSchemaOp(op_ptr, op_key)) {
       getOpRec(op_ptr, t_ptr);
@@ -2267,7 +2269,7 @@ private:
     static Uint32 weight(Uint32 state) {
     /*
       Return the "weight" of a transaction state, used to determine
-      the absolute order of beleived transaction states at master
+      the absolute order of believed transaction states at master
       takeover.
      */
       switch ((TransState) state) {

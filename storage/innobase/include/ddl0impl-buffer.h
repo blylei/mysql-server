@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2020, 2021, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -211,7 +211,7 @@ struct Key_sort_buffer : private ut::Non_copyable {
 
   /** Compare two merge data tuples.
   @param[in] lhs                Fields to compare on the LHS
-  @param[in] rhs                Fields to comapre on the RHS
+  @param[in] rhs                Fields to compare on the RHS
   @param[in,out] dup            For capturing duplicates (or nullptr).
   @retval +ve - if lhs > rhs
   @retval -ve - if lhs < rhs

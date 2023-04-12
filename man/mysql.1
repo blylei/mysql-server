@@ -2,12 +2,12 @@
 .\"     Title: mysql
 .\"    Author: [FIXME: author] [see http://docbook.sf.net/el/author]
 .\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
-.\"      Date: 11/26/2021
+.\"      Date: 11/26/2022
 .\"    Manual: MySQL Database System
 .\"    Source: MySQL 8.0
 .\"  Language: English
 .\"
-.TH "MYSQL" "1" "11/26/2021" "MySQL 8\&.0" "MySQL Database System"
+.TH "MYSQL" "1" "11/26/2022" "MySQL 8\&.0" "MySQL Database System"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -246,7 +246,7 @@ displays binary data using hexadecimal notation (0x\fIvalue\fR)\&. This occurs w
 when enabled affects display of all binary strings, including those returned by functions such as
 CHAR()
 and
-UNHEX()\&. The following example demonistrates this using the ASCII code for
+UNHEX()\&. The following example demonstrates this using the ASCII code for
 A
 (65 decimal, 41 hexadecimal):
 .sp
@@ -963,7 +963,7 @@ ALTER USER \fIuser\fR \fIfactor\fR FINISH REGISTRATION SET CHALLENGE_RESPONSE AS
 .\}
 .sp
 The statement completes the registration and sends the following information to the server as part of the
-\fIauth_string\fR: athenticator data, an optional attestation certificate in X\&.509 format, and a signature\&.
+\fIauth_string\fR: authenticator data, an optional attestation certificate in X\&.509 format, and a signature\&.
 .sp
 The initiate and registration steps must be performed in a single connection, as the challenge received by the client during the initiate step is saved to the client connection handler\&. Registration would fail if the registration step was performed by a different connection\&. The
 \fB\-\-fido\-register\-factor\fR
@@ -975,7 +975,7 @@ The
 \fB\-\-fido\-register\-factor\fR
 option is only available for the
 \fBmysql\fR
-client\&. Other MySQL client programs do not support it\&.
+client and MySQL Shell\&. Other MySQL client programs do not support it\&.
 .sp
 For related information, see
 the section called \(lqUsing FIDO Authentication\(rq\&.
@@ -2368,8 +2368,10 @@ charset   (\eC) Switch to another charset\&. Might be needed for processing
 warnings  (\eW) Show warnings after every statement\&.
 nowarning (\ew) Don\*(Aqt show warnings after every statement\&.
 resetconnection(\ex) Clean session context\&.
-query_attributes(\e) Sets string parameters (name1 value1 name2 value2 \&.\&.\&.)
+query_attributes Sets string parameters (name1 value1 name2 value2 \&.\&.\&.)
 for the next query to pick up\&.
+ssl_session_data_print Serializes the current SSL session data to stdout 
+or file\&.
 For server side help, type \*(Aqhelp contents\*(Aq
 .fi
 .if n \{\
@@ -2917,6 +2919,28 @@ or
 \e\e\&.
 .sp
 Quote characters are taken as part of the file name itself\&. For best results, the name should not include space characters\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+ssl_session_data_print [\fIfile_name\fR]
+.sp
+Fetches, serializes, and optionally stores the session data of a successful connection\&. The optional file name and arguments may be given to specify the file to store serialized session data\&. If omitted, the session data is printed to
+stdout\&.
+.sp
+If the MySQL session is configured for reuse, session data from the file is deserialized and supplied to the
+connect
+command to reconnect\&. When the session is reused successfully, the
+status
+command contains a row showing
+SSL session reused: true
+while the client remains reconnected to the server\&.
 .RE
 .sp
 .RS 4
@@ -4030,6 +4054,15 @@ SHOW MASTER LOGS
 Lists the binary log files on the server\&. This statement is used as
 part of the procedure described in [purge\-binary\-logs], that shows how
 to determine which logs can be purged\&.
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
 mysql> SHOW BINARY LOGS;
 +\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+\-\-\-\-\-\-\-\-\-\-\-+\-\-\-\-\-\-\-\-\-\-\-+
 | Log_name      | File_size | Encrypted |
@@ -4163,7 +4196,7 @@ ignores Unicode byte order mark (BOM) characters at the beginning of input files
 to change its default character set\&. To do that, invoke
 \fBmysql\fR
 with an option such as
-\fB\-\-default\-character\-set=utf8\fR\&.
+\fB\-\-default\-character\-set=utf8mb4\fR\&.
 .PP
 For more information about batch mode, see
 Section\ \&3.5, \(lqUsing mysql in Batch Mode\(rq\&.
@@ -4410,9 +4443,9 @@ Go to the console window properties, select the font tab, and choose Lucida Cons
 Execute
 \fBmysql\&.exe\fR
 with the
-\fB\-\-default\-character\-set=utf8\fR
+\fB\-\-default\-character\-set=utf8mb4\fR
 (or
-utf8mb4) option\&. This option is necessary because
+utf8mb3) option\&. This option is necessary because
 utf16le
 is one of the character sets that cannot be used as the client character set\&. See
 the section called \(lqImpermissible Client Character Sets\(rq\&.
@@ -4425,9 +4458,9 @@ uses the Windows APIs to communicate with the console using UTF\-16LE, and commu
 To avoid those steps each time you run
 \fBmysql\fR, you can create a shortcut that invokes
 \fBmysql\&.exe\fR\&. The shortcut should set the console font to Lucida Console or some other compatible Unicode font, and pass the
-\fB\-\-default\-character\-set=utf8\fR
+\fB\-\-default\-character\-set=utf8mb4\fR
 (or
-utf8mb4) option to
+utf8mb3) option to
 \fBmysql\&.exe\fR\&.
 .PP
 Alternatively, create a shortcut that only sets the console font, and set the character set in the
@@ -4441,7 +4474,7 @@ file:
 .\}
 .nf
 [mysql]
-default\-character\-set=utf8
+default\-character\-set=utf8mb4   # or utf8mb3
 .fi
 .if n \{\
 .RE
@@ -4805,7 +4838,7 @@ command)\&.
 .SH "COPYRIGHT"
 .br
 .PP
-Copyright \(co 1997, 2021, Oracle and/or its affiliates.
+Copyright \(co 1997, 2022, Oracle and/or its affiliates.
 .PP
 This documentation is free software; you can redistribute it and/or modify it only under the terms of the GNU General Public License as published by the Free Software Foundation; version 2 of the License.
 .PP

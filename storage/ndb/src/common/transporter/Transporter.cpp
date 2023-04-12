@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 */
 
 
+#include "util/require.h"
 #include <TransporterRegistry.hpp>
 #include <TransporterCallback.hpp>
 #include "Transporter.hpp"
@@ -31,6 +32,7 @@
 #include <SocketAuthenticator.hpp>
 #include <InputStream.hpp>
 #include <OutputStream.hpp>
+#include "util/cstrbuf.h"
 
 #include <EventLogger.hpp>
 
@@ -90,14 +92,21 @@ Transporter::Transporter(TransporterRegistry &t_reg,
   DBUG_ENTER("Transporter::Transporter");
 
   // Initialize member variables
-  ndb_socket_invalidate(&theSocket);
+  ndb_socket_initialize(&theSocket);
   m_multi_transporter_instance = 0;
   m_recv_thread_idx = 0;
   m_is_active = true;
 
   assert(rHostName);
-  if (rHostName && strlen(rHostName) > 0){
-    snprintf(remoteHostName, sizeof(remoteHostName), "%s", rHostName);
+  if (rHostName && strlen(rHostName) > 0)
+  {
+    if (cstrbuf_copy(remoteHostName, rHostName) == 1)
+    {
+      ndbout << "Unable to setup transporter. Node " << rNodeId
+             << " had a too long hostname '" << rHostName
+             << "'. Update configuration." << endl;
+      exit(-1);
+    }
   }
   else
   {
@@ -110,7 +119,13 @@ Transporter::Transporter(TransporterRegistry &t_reg,
     }
     remoteHostName[0]= 0;
   }
-  snprintf(localHostName, sizeof(localHostName), "%s", lHostName);
+  if (cstrbuf_copy(localHostName, lHostName) == 1)
+  {
+    ndbout << "Unable to setup transporter. Node " << lNodeId
+           << " had a too long hostname '" << lHostName
+           << "'. Update configuration." << endl;
+    exit(-1);
+  }
 
   DBUG_PRINT("info",("rId=%d lId=%d isServer=%d rHost=%s lHost=%s s_port=%d",
 		     remoteNodeId, localNodeId, isServer,
@@ -126,7 +141,7 @@ Transporter::Transporter(TransporterRegistry &t_reg,
   m_timeOutMillis = 3000;
 
   if (isServer)
-    m_socket_client= 0;
+    m_socket_client= nullptr;
   else
   {
     m_socket_client= new SocketClient(new SocketAuthSimple("ndbd",
@@ -207,7 +222,7 @@ Transporter::update_connect_state(bool connected)
 }
 
 bool
-Transporter::connect_server(NDB_SOCKET_TYPE sockfd,
+Transporter::connect_server(ndb_socket_t sockfd,
                             BaseString& msg) {
   // all initial negotiation is done in TransporterRegistry::connect_server
   DBUG_ENTER("Transporter::connect_server");
@@ -248,7 +263,7 @@ Transporter::connect_server(NDB_SOCKET_TYPE sockfd,
 bool
 Transporter::connect_client()
 {
-  NDB_SOCKET_TYPE sockfd;
+  ndb_socket_t sockfd;
   DBUG_ENTER("Transporter::connect_client");
 
   require(!isMultiTransporter());
@@ -307,7 +322,7 @@ Transporter::connect_client()
 }
 
 bool
-Transporter::connect_client(NDB_SOCKET_TYPE sockfd)
+Transporter::connect_client(ndb_socket_t sockfd)
 {
   DBUG_ENTER("Transporter::connect_client(sockfd)");
 
@@ -320,8 +335,8 @@ Transporter::connect_client(NDB_SOCKET_TYPE sockfd)
 
   if (!ndb_socket_valid(sockfd))
   {
-    DBUG_PRINT("error", ("Socket " MY_SOCKET_FORMAT " is not valid",
-                         MY_SOCKET_FORMAT_VALUE(sockfd)));
+    DBUG_PRINT("error", ("Socket %s is not valid",
+                         ndb_socket_to_string(sockfd).c_str()));
     DEBUG_FPRINTF((stderr, "Socket not valid\n"));
     DBUG_RETURN(false);
   }
@@ -390,7 +405,7 @@ Transporter::connect_client(NDB_SOCKET_TYPE sockfd)
   DBUG_PRINT("info", ("Reading reply"));
   char buf[256];
   SocketInputStream s_input(sockfd);
-  if (s_input.gets(buf, 256) == 0)
+  if (s_input.gets(buf, 256) == nullptr)
   {
     DBUG_PRINT("error", ("Failed to read reply"));
     ndb_socket_close(sockfd);
@@ -540,19 +555,17 @@ Transporter::checksum_state::dumpBadChecksumInfo(Uint32 inputSum,
 }
 
 void
-Transporter::set_get(NDB_SOCKET_TYPE fd,
+Transporter::set_get(ndb_socket_t fd,
                      int level,
                      int optval,
-                     const char *optname, 
+                     const char */*optname*/,
                      int val)
 {
   int actual = 0, defval = 0;
-  socket_len_t len = sizeof(actual);
 
-  ndb_getsockopt(fd, level, optval, (char*)&defval, &len);
+  ndb_getsockopt(fd, level, optval, &defval);
 
-  if (ndb_setsockopt(fd, level, optval,
-                    (char*)&val, sizeof(val)) < 0)
+  if (ndb_setsockopt(fd, level, optval, &val) < 0)
   {
 #ifdef DEBUG_TRANSPORTER
     g_eventLogger->error("setsockopt(%s, %d) errno: %d %s",
@@ -560,10 +573,7 @@ Transporter::set_get(NDB_SOCKET_TYPE fd,
 #endif
   }
   
-  len = sizeof(actual);
-  if ((ndb_getsockopt(fd, level, optval,
-                     (char*)&actual, &len) == 0) &&
-      actual != val)
+  if ((ndb_getsockopt(fd, level, optval, &actual) == 0) && actual != val)
   {
 #ifdef DEBUG_TRANSPORTER
     g_eventLogger->error("setsockopt(%s, %d) - actual %d default: %d",

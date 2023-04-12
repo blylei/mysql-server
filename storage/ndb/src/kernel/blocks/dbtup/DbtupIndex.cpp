@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -61,7 +61,7 @@ Dbtup::tuxGetTupAddr(Uint32 fragPtrI,
 {
   jamEntryDebug();
   PagePtr pagePtr;
-  c_page_pool.getPtr(pagePtr, pageId);
+  ndbrequire(c_page_pool.getPtr(pagePtr, pageId));
   lkey1 = pagePtr.p->frag_page_id;
   lkey2 = pageIndex;
 }
@@ -757,7 +757,7 @@ Dbtup::buildIndex(Signal* signal, Uint32 buildPtrI)
       goto next_tuple;
     }
 
-    c_page_pool.getPtr(pagePtr, realPageId);
+    ndbrequire(c_page_pool.getPtr(pagePtr, realPageId));
 
 next_tuple:
     // get tuple
@@ -822,7 +822,7 @@ next_tuple:
       update. If an update aborts then the copy tuple is copied to
       the original tuple. The build will however have found that
       tuple as a copy tuple. The original tuple is stable and is thus
-      preferrable to store in TUX.
+      preferable to store in TUX.
       */
       jam();
 
@@ -831,7 +831,7 @@ next_tuple:
        *   we will here build all copies of the tuple
        *
        * Note only "real" tupVersion's should be added 
-       *      i.e delete's shouldnt be added 
+       *      i.e delete's shouldn't be added 
        *      (unless it's the first op, when "original" should be added)
        */
 
@@ -1168,7 +1168,7 @@ Dbtup::mt_scan_next(Uint32 tableId, Uint32 fragPtrI,
   }
 
   PagePtr pagePtr;
-  c_page_pool.getPtr(pagePtr, pos->m_page_no);
+  ndbrequire(c_page_pool.getPtr(pagePtr, pos->m_page_no));
 
   while (1)
   {
@@ -1203,7 +1203,7 @@ Dbtup::mt_scan_next(Uint32 tableId, Uint32 fragPtrI,
       break;
 
     pos->m_page_idx = 0;
-    c_page_pool.getPtr(pagePtr, pos->m_page_no);
+    ndbrequire(c_page_pool.getPtr(pagePtr, pos->m_page_no));
   }
 
   return 1;

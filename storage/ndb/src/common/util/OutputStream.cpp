@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,7 +22,6 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
-
 #include <ndb_global.h>
 
 #include <OutputStream.hpp>
@@ -32,7 +31,7 @@
 
 BufferedOutputStream::BufferedOutputStream(LogBuffer* plogBuf){
   logBuf = plogBuf;
-  assert(logBuf != NULL);
+  assert(logBuf != nullptr);
 }
 
 int
@@ -74,7 +73,7 @@ BufferedOutputStream::println(const char * fmt, ...){
 int
 BufferedOutputStream::write(const void * buf, size_t len)
 {
-  return (int)(logBuf->append((void*)buf, len));
+  return (int)(logBuf->append(buf, len));
 }
 
 FileOutputStream::FileOutputStream(FILE * file){
@@ -105,7 +104,7 @@ FileOutputStream::write(const void * buf, size_t len)
   return (int)fwrite(buf, len, 1, f);
 }
 
-SocketOutputStream::SocketOutputStream(NDB_SOCKET_TYPE socket,
+SocketOutputStream::SocketOutputStream(ndb_socket_t socket,
 				       unsigned write_timeout_ms) :
   m_socket(socket),
   m_timeout_ms(write_timeout_ms),
@@ -121,7 +120,7 @@ SocketOutputStream::print(const char * fmt, ...){
   char *buf2 = buf;
   size_t size;
 
-  if (fmt != 0 && fmt[0] != 0) {
+  if (fmt != nullptr && fmt[0] != 0) {
     va_start(ap, fmt);
     size = BaseString::vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
@@ -155,7 +154,7 @@ SocketOutputStream::println(const char * fmt, ...){
   char *buf2 = buf;
   size_t size;
 
-  if (fmt != 0 && fmt[0] != 0) {
+  if (fmt != nullptr && fmt[0] != 0) {
     va_start(ap, fmt);
     size = BaseString::vsnprintf(buf, sizeof(buf), fmt, ap)+1;// extra byte for '/n'
     va_end(ap);
@@ -204,7 +203,7 @@ SocketOutputStream::write(const void * buf, size_t len)
 
 #include <UtilBuffer.hpp>
 
-BufferedSockOutputStream::BufferedSockOutputStream(NDB_SOCKET_TYPE socket,
+BufferedSockOutputStream::BufferedSockOutputStream(ndb_socket_t socket,
                                                    unsigned write_timeout_ms) :
   SocketOutputStream(socket, write_timeout_ms),
   m_buffer(*new UtilBuffer)
@@ -230,7 +229,7 @@ BufferedSockOutputStream::print(const char * fmt, ...){
 
   // Allocate a temp buffer for the string
   UtilBuffer tmp;
-  if (tmp.append(len+1) == 0)
+  if (tmp.append(len+1) == nullptr)
     return -1;
 
   // Print to temp buffer
@@ -239,7 +238,7 @@ BufferedSockOutputStream::print(const char * fmt, ...){
   va_end(ap);
 
   // Grow real buffer so it can hold the string
-  if ((pos= (char*)m_buffer.append(len)) == 0)
+  if ((pos= (char*)m_buffer.append(len)) == nullptr)
     return -1;
 
   // Move everything except ending 0 to real buffer
@@ -261,7 +260,7 @@ BufferedSockOutputStream::println(const char * fmt, ...){
   va_end(ap);
 
   // Grow buffer so it can hold the string and the new line
-  if ((pos= (char*)m_buffer.append(len+1)) == 0)
+  if ((pos= (char*)m_buffer.append(len+1)) == nullptr)
     return -1;
 
   // Print string to buffer

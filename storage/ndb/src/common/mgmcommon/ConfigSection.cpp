@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include <ndb_global.h>
 #include <string.h>
 #include <kernel_types.h>
@@ -112,7 +113,7 @@ void ConfigSection::free_entry(Entry *entry)
   if (entry->m_type == StringTypeId)
   {
     DEB_MALLOC(("this(%p)free(%u) => %p",this,__LINE__,entry->m_string));
-    free((void*)entry->m_string);
+    free(const_cast<char *>(entry->m_string));
   }
   delete entry;
 }
@@ -490,7 +491,7 @@ ConfigSection::get_default_section() const
       break;
     }
   }
-  return 0;
+  return nullptr;
 }
 
 Uint32
@@ -570,7 +571,7 @@ ConfigSection::get_v1_length() const
    * the section when sent in v1 format.
    * 
    * We do this by scanning them (they are both stored in key order when
-   * in not updateable format. If we find a key that exists in this
+   * in not updatable format. If we find a key that exists in this
    * section we will use that and otherwise we will use the default
    * key. If it exists in both the section and in the default section
    * we will use the value from the section. We will move to the next
@@ -846,7 +847,7 @@ bool ConfigSection::set_string(Entry *update_entry,
     if (free_string)
     {
       DEB_MALLOC(("free(%u) => %p", __LINE__, free_str));
-      free((void*)free_str);
+      free(const_cast<char *>(free_str));
     }
   }
   return true;

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,8 @@
 #ifndef _PROCESS_MANAGER_H_
 #define _PROCESS_MANAGER_H_
 
+#include "mysql/harness/loader.h"
+#include "process_launcher.h"
 #include "process_wrapper.h"
 
 #include <gmock/gmock.h>
@@ -52,7 +54,7 @@ using mysql_harness::Path;
 
 /** @class ProcessManager
  *
- * Manages collecion of the processes
+ * Manages collection of the processes
  * Enables creating, shutting down etc.
  *
  **/
@@ -67,6 +69,8 @@ class ProcessManager {
 #endif
 
   using OutputResponder = ProcessWrapper::OutputResponder;
+
+  using exit_status_type = mysql_harness::ProcessLauncher::exit_status_type;
 
   /**
    * set origin path.
@@ -97,7 +101,12 @@ class ProcessManager {
     }
 
     Spawner &expected_exit_code(int v) {
-      expected_exit_code_ = v;
+      expected_exit_status_ = v;
+      return *this;
+    }
+
+    Spawner &expected_exit_code(exit_status_type v) {
+      expected_exit_status_ = v;
       return *this;
     }
 
@@ -108,6 +117,11 @@ class ProcessManager {
 
     Spawner &output_responder(OutputResponder resp) {
       output_responder_ = std::move(resp);
+      return *this;
+    }
+
+    Spawner &with_core_dump(bool dump_core) {
+      with_core_ = dump_core;
       return *this;
     }
 
@@ -125,7 +139,8 @@ class ProcessManager {
     Spawner(
         std::string executable, std::string logging_dir,
         std::string logging_file, std::string notify_socket_path,
-        std::list<std::tuple<std::unique_ptr<ProcessWrapper>, int>> &processes)
+        std::list<std::tuple<std::unique_ptr<ProcessWrapper>, exit_status_type>>
+            &processes)
         : executable_{std::move(executable)},
           logging_dir_{std::move(logging_dir)},
           logging_file_{std::move(logging_file)},
@@ -150,11 +165,11 @@ class ProcessManager {
         wait_socket_t &sock, std::chrono::milliseconds timeout);
 
     std::string executable_;
-    int expected_exit_code_{EXIT_SUCCESS};
+    exit_status_type expected_exit_status_{EXIT_SUCCESS};
 
     bool with_sudo_{false};
     bool catch_stderr_{true};
-    std::chrono::milliseconds sync_point_timeout_{5000};
+    std::chrono::milliseconds sync_point_timeout_{30000};
     SyncPoint sync_point_{SyncPoint::READY};
     OutputResponder output_responder_{kEmptyResponder};
 
@@ -162,14 +177,22 @@ class ProcessManager {
     std::string logging_file_;
     std::string notify_socket_path_;
 
-    std::list<std::tuple<std::unique_ptr<ProcessWrapper>, int>> &processes_;
+    std::list<std::tuple<std::unique_ptr<ProcessWrapper>, exit_status_type>>
+        &processes_;
+
+    bool with_core_{false};
   };
 
   Spawner spawner(std::string executable, std::string logging_file = "");
 
   Spawner router_spawner() {
-    return spawner(mysqlrouter_exec_.str(), "mysqlrouter.log");
+    return spawner(mysqlrouter_exec_.str(), "mysqlrouter.log")
+        .with_core_dump(true);
   }
+
+  /** @brief Gets path to the directory used as log output directory
+   */
+  Path get_logging_dir() const { return logging_dir_.name(); }
 
  protected:
   virtual ~ProcessManager() = default;
@@ -177,22 +200,44 @@ class ProcessManager {
   /**
    * shutdown all managed processes.
    */
-  void shutdown_all();
+  void shutdown_all(mysql_harness::ProcessLauncher::ShutdownEvent event =
+                        mysql_harness::ProcessLauncher::ShutdownEvent::TERM);
+
+  /**
+   * terminate processes with ABRT which are still alive.
+   *
+   * may trigger a core-file if enabled in the process.
+   */
+  void terminate_all_still_alive();
 
   /**
    * ensures all processes exited and checks for crashes.
    */
   void ensure_clean_exit();
 
+  void ensure_clean_exit(ProcessWrapper &process);
+
+  stdx::expected<void, std::error_code> wait_for_exit(
+      std::chrono::milliseconds timeout = kDefaultWaitForExitTimeout);
+
   /**
    * ensures given process exited with expected return value and checks for
    * crashes.
    */
   void check_exit_code(
-      ProcessWrapper &process, int expected_exit_code = EXIT_SUCCESS,
+      ProcessWrapper &process, exit_status_type exit_status = EXIT_SUCCESS,
       std::chrono::milliseconds timeout = kDefaultWaitForExitTimeout);
 
   void dump_all();
+
+  /**
+   * reset the monitored processes.
+   *
+   * - shuts down all running processes
+   * - checks for expected exit-code
+   * - removes the monitoring of the processes
+   */
+  void clear();
 
   /**
    * ensures given port is ready for accepting connections, prints some debug
@@ -230,7 +275,7 @@ class ProcessManager {
    * @param   catch_stderr bool flag indicating if the process' error output
    * stream should be included in the output caught from the process
    * @param   with_sudo    bool flag indicating if the process' should be
-   * execute with sudo priviledges
+   * execute with sudo privileges
    * @param wait_for_notify_ready
    *        if >=0 the method should use the notification socket and the value
    * is the time in milliseconds - how long the it should wait for the process
@@ -240,12 +285,13 @@ class ProcessManager {
    * returning string that should be send back to the process input (if not
    * empty)
    *
-   * @returns handle to the launched proccess
+   * @returns handle to the launched process
    */
   ProcessWrapper &launch_router(
       const std::vector<std::string> &params, int expected_exit_code = 0,
       bool catch_stderr = true, bool with_sudo = false,
-      std::chrono::milliseconds wait_for_notify_ready = std::chrono::seconds(5),
+      std::chrono::milliseconds wait_for_notify_ready =
+          std::chrono::seconds(30),
       OutputResponder output_responder = kEmptyResponder);
 
   /** @brief Launches the MySQLServerMock process.
@@ -267,7 +313,7 @@ class ProcessManager {
    * launching command should wait for the process to notify it is ready.
    * Otherwise the caller does not want to wait for the notification.
    *
-   * @returns handle to the launched proccess
+   * @returns handle to the launched process
    */
   ProcessWrapper &launch_mysql_server_mock(
       const std::string &json_file, unsigned port, int expected_exit_code = 0,
@@ -275,7 +321,7 @@ class ProcessManager {
       const std::string &module_prefix = "",
       const std::string &bind_address = "0.0.0.0",
       std::chrono::milliseconds wait_for_notify_ready =
-          std::chrono::seconds(5));
+          std::chrono::seconds(30));
 
   /**
    * launch mysql_server_mock from cmdline args.
@@ -284,7 +330,7 @@ class ProcessManager {
       const std::vector<std::string> &server_params, unsigned port,
       int expected_exit_code = 0,
       std::chrono::milliseconds wait_for_notify_ready =
-          std::chrono::seconds(5));
+          std::chrono::seconds(30));
 
   /**
    * build cmdline args for mysql_server_mock.
@@ -297,8 +343,9 @@ class ProcessManager {
   /** @brief Launches a process.
    *
    * @param command       path to executable
-   * @param params        array of commanline parameters to pass to the
+   * @param params        array of commandline parameters to pass to the
    * executable
+   * @param expected_exit_status expected ExitStatus
    * @param catch_stderr  if true stderr will also be captured (combined with
    * stdout)
    * @param env_vars      environment variables that shoould be passed to the
@@ -307,19 +354,20 @@ class ProcessManager {
    * returning string that should be send back to the process input (if not
    * empty)
    *
-   * @returns handle to the launched proccess
+   * @returns handle to the launched process
    */
   ProcessWrapper &launch_command(
       const std::string &command, const std::vector<std::string> &params,
-      int expected_exit_code, bool catch_stderr,
+      ExitStatus expected_exit_status, bool catch_stderr,
       std::vector<std::pair<std::string, std::string>> env_vars,
       OutputResponder output_responder = kEmptyResponder);
 
   /** @brief Launches a process.
    *
    * @param command       path to executable
-   * @param params        array of commanline parameters to pass to the
+   * @param params        array of commandline parameters to pass to the
    * executable
+   * @param expected_exit_status expected ExitStatus
    * @param catch_stderr  if true stderr will also be captured (combined with
    * stdout)
    * @param wait_notify_ready if >=0 time in milliseconds - how long the
@@ -329,11 +377,11 @@ class ProcessManager {
    * returning string that should be send back to the process input (if not
    * empty)
    *
-   * @returns handle to the launched proccess
+   * @returns handle to the launched process
    */
   ProcessWrapper &launch_command(
       const std::string &command, const std::vector<std::string> &params,
-      int expected_exit_code = 0, bool catch_stderr = true,
+      ExitStatus expected_exit_status = 0, bool catch_stderr = true,
       std::chrono::milliseconds wait_notify_ready =
           std::chrono::milliseconds(-1),
       OutputResponder output_responder = kEmptyResponder);
@@ -343,16 +391,13 @@ class ProcessManager {
    */
   const Path &get_data_dir() const { return data_dir_; }
 
-  /** @brief Gets path to the directory used as log output directory
-   */
-  Path get_logging_dir() const { return Path(logging_dir_.name()); }
-
   /** @brief returns a map with default [DEFAULT] section parameters
    *
    * @return default parameters for [DEFAULT] section
    */
   std::map<std::string, std::string> get_DEFAULT_defaults() const;
 
+ public:
   class ConfigWriter {
    public:
     using section_type = std::map<std::string, std::string>;
@@ -414,6 +459,7 @@ class ProcessManager {
    */
   ConfigWriter config_writer(const std::string &directory);
 
+ protected:
   /** @brief create config file
    *
    * @param directory directory in which the config file will be created
@@ -421,7 +467,7 @@ class ProcessManager {
    * sections)
    * @param default_section [DEFAULT] section parameters
    * @param name config file name
-   * @param extra_defaults addional parameters to add to [DEFAULT]
+   * @param extra_defaults additional parameters to add to [DEFAULT]
    * @param enable_debug_logging add a logger section with debug level
    *
    * @return path to the created file
@@ -487,7 +533,8 @@ class ProcessManager {
   TempDirectory logging_dir_;
   TempDirectory test_dir_;
 
-  std::list<std::tuple<std::unique_ptr<ProcessWrapper>, int>> processes_;
+  std::list<std::tuple<std::unique_ptr<ProcessWrapper>, exit_status_type>>
+      processes_;
   static const OutputResponder kEmptyResponder;
 };
 

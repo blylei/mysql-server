@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021, Oracle and/or its affiliates.
+  Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -77,18 +77,11 @@ static mysql_harness::security_descriptor_type only_user_read_writable_perms() {
 #endif
 }
 
+#ifndef _WIN32
 static mysql_harness::security_descriptor_type only_user_rwx_perms() {
-#ifdef _WIN32
-  using namespace mysql_harness::win32::access_rights;
-
-  return unwrap(AclBuilder()
-                    .set(AclBuilder::CurrentUser{},
-                         READ_CONTROL | WRITE_DAC | FILE_ALL_ACCESS)
-                    .build());
-#else
   return S_IRUSR | S_IWUSR | S_IXUSR;
-#endif
 }
+#endif
 
 static mysql_harness::security_descriptor_type other_readable_perms() {
 #ifdef _WIN32

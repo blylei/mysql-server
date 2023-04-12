@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 #ifndef FS_BUFFER_HPP
 #define FS_BUFFER_HPP
 
+#include "util/require.h"
 #include <ndb_global.h>
 #include <EventLogger.hpp>
 
@@ -115,7 +116,7 @@ public:
   void eof();
 
   /**
-   * Getters for varibles
+   * Getters for variables
    */
   Uint32 getMaxWrite() const { return m_maxWrite;}
   Uint32 getMinRead() const { return m_minRead;}

@@ -1,4 +1,4 @@
--- Copyright (c) 2008, 2021, Oracle and/or its affiliates.
+-- Copyright (c) 2008, 2022, Oracle and/or its affiliates.
 --
 -- This program is free software; you can redistribute it and/or modify
 -- it under the terms of the GNU General Public License, version 2.0,
@@ -196,10 +196,16 @@ INSERT INTO global_suppressions VALUES
  ("skip-name-resolve mode"),
  ("slave SQL thread aborted"),
  ("Slave: .*Duplicate entry"),
+ /* In certain cases, due to unlucky scheduling, we might receive a temporary
+ warning about running out of space in the redo log. In such case, it might
+ result in temporary stall and suggestion to increase space in the redo log
+ by increasing the innodb_redo_log_capacity. */
+ ("Consider increasing innodb_redo_log_capacity."),
+ ("Redo log reclaimed some free space"),
 
  /*
     innodb_dedicated_server warning which raised if innodb_buffer_pool_size,
-    innodb_log_file_size or innodb_flush_method is specified.
+    innodb_redo_log_capacity or innodb_flush_method is specified.
  */
  ("InnoDB: Option innodb_dedicated_server is ignored"),
 
@@ -431,11 +437,11 @@ BEGIN
   --
   -- Get the number of marked lines and return result
   --
-  SELECT COUNT(*) INTO @num_warnings FROM error_log
+  SELECT /*+SET_VAR(use_secondary_engine=OFF)*/ COUNT(*) INTO @num_warnings FROM error_log
     WHERE suspicious=1;
 
   IF @num_warnings > 0 THEN
-    SELECT line
+    SELECT /*+SET_VAR(use_secondary_engine=OFF)*/ line
         FROM error_log WHERE suspicious=1;
     -- SELECT * FROM test_suppressions;
     -- Return 2 -> check failed

@@ -1,7 +1,7 @@
 #ifndef SQL_ITERATORS_SORTING_ITERATOR_H_
 #define SQL_ITERATORS_SORTING_ITERATOR_H_
 
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -72,15 +72,15 @@ class SortingIterator final : public RowIterator {
   // Calls Init() on the source iterator, then does the actual sort.
   // NOTE: If you call Init() again, SortingIterator will actually
   // do a _new sort_, not just rewind the iterator. This is because a
-  // TABLE_REF we depend on may have changed so the produced record set could be
-  // different from what we had last time.
+  // Index_lookup we depend on may have changed so the produced record
+  // set could be different from what we had last time.
   //
   // Currently, this isn't a big problem performance-wise, since we never
   // really sort the right-hand side of a join (we only sort the leftmost
   // table or the final result, and we don't have merge joins). However,
   // re-inits could very well happen in the case of a dependent subquery
   // that needs ORDER BY with LIMIT, so for correctness, we really need
-  // the re-sort. Longer-term we should test whether the TABLE_REF is
+  // the re-sort. Longer-term we should test whether the Index_lookup is
   // unchanged, and if so, just re-init the result iterator.
   bool Init() override;
 

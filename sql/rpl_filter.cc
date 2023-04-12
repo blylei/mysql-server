@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,7 +56,7 @@
 #include "sql/rpl_rli.h"      // Relay_log_info
 #include "sql/sql_class.h"
 #include "sql/sql_lex.h"
-#include "sql/table.h"  // TABLE_LIST
+#include "sql/table.h"  // Table_ref
 #include "sql/thr_malloc.h"
 #include "sql_string.h"
 #include "template_utils.h"  // my_free_container_pointers
@@ -358,7 +358,7 @@ err:
 
   SYNOPSIS
     tables_ok()
-    db              db to use if db in TABLE_LIST is undefined for a table
+    db              db to use if db in Table_ref is undefined for a table
     tables          list of tables to check
 
   NOTES
@@ -391,7 +391,7 @@ err:
     1           should be logged/replicated
 */
 
-bool Rpl_filter::tables_ok(const char *db, TABLE_LIST *tables) {
+bool Rpl_filter::tables_ok(const char *db, Table_ref *tables) {
   bool some_tables_updating = false;
   DBUG_TRACE;
 
@@ -525,7 +525,7 @@ bool Rpl_filter::db_ok(const char *db, bool need_increase_counter) {
     With replicate_wild_ignore_table, we only check tables. When
     one does 'DROP DATABASE db1', tables are not involved and the
     statement will be replicated, while users could expect it would not (as it
-    rougly means 'DROP db1.first_table, DROP db1.second_table...').
+    roughly means 'DROP db1.first_table, DROP db1.second_table...').
     In other words, we want to interpret 'db1.%' as "everything touching db1".
     That is why we want to match 'db1' against 'db1.%' wild table rules.
 
@@ -890,7 +890,7 @@ int Rpl_filter::set_db_rewrite(mem_root_deque<Item *> *rewrite_db_pair_list,
 
   auto it = rewrite_db_pair_list->begin();
 
-  /* Please note that grammer itself allows only even number of db values. So
+  /* Please note that grammar itself allows only even number of db values. So
    * it is ok to do it++ twice without checking anything. */
   while (status == 0 && it != rewrite_db_pair_list->end()) {
     Item *db_key = *it++;

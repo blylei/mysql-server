@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -40,19 +40,13 @@
 
 namespace mysql_harness {
 
-/** @brief Rename a thread (useful for debugging purposes).
- *
- * @param thread_name thread name, 15 chars max
- */
-void HARNESS_EXPORT rename_thread(const char thread_name[16]);
-
 /** @brief Return a truncated version of input string (fast version)
  *
  * WARNING!
  * This function is optimised for speed, but see note below for use
  * restrictions. If these are a problem, use truncate_string_r() instead.
  *
- * This function returns a refernce to the input string if input.size() <=
+ * This function returns a reference to the input string if input.size() <=
  * max_len, otherwise it returns a reference to a truncated copy of input
  * string.
  *
@@ -202,28 +196,6 @@ std::string list_elements(Collection collection,
                           const std::string &delim = ",") {
   return list_elements(collection.begin(), collection.end(), delim);
 }
-
-/**
- * dismissable scope guard.
- *
- * used with RAII to call cleanup function if not dismissed
- *
- * allows to release resources in case exceptions are thrown
- */
-class ScopeGuard {
- public:
-  template <class Callable>
-  ScopeGuard(Callable &&undo_func)
-      : undo_func_{std::forward<Callable>(undo_func)} {}
-
-  void dismiss() { undo_func_ = nullptr; }
-  ~ScopeGuard() {
-    if (undo_func_) undo_func_();
-  }
-
- private:
-  std::function<void()> undo_func_;
-};
 
 /**
  * Gets a Value from std::map for given Key. Returns provided default if the Key

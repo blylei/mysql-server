@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -85,7 +85,7 @@ Dynamic_privilege_register *get_dynamic_privilege_register(void) {
     @retval false Success
 */
 
-bool populate_dynamic_privilege_caches(THD *thd, TABLE_LIST *tablelst) {
+bool populate_dynamic_privilege_caches(THD *thd, Table_ref *tablelst) {
   DBUG_TRACE;
   bool error = false;
   assert(assert_acl_cache_write_lock(thd));

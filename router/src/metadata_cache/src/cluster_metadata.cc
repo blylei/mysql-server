@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -280,7 +280,7 @@ bool ClusterMetadata::update_router_attributes(
   } else {
     query =
         "UPDATE mysql_innodb_cluster_metadata.v2_routers "
-        "SET version = ?, attributes = "
+        "SET version = ?, last_check_in = NOW(), attributes = "
         "JSON_SET(JSON_SET(JSON_SET(JSON_SET(JSON_SET( "
         "IF(attributes IS NULL, '{}', attributes), "
         "'$.RWEndpoint', ?), "
@@ -296,21 +296,7 @@ bool ClusterMetadata::update_router_attributes(
         << ra.rw_x_port << ra.ro_x_port << ra.metadata_user_name << router_id
         << sqlstring::end;
 
-  try {
-    connection->execute(query);
-  } catch (const MySQLSession::Error &e) {
-    if (e.code() == ER_TABLEACCESS_DENIED_ERROR) {
-      log_warning(
-          "Updating the router attributes in metadata failed: %s (%u)\n"
-          "Make sure to follow the correct steps to upgrade your metadata.\n"
-          "Run the dba.upgradeMetadata() then launch the new Router version "
-          "when prompted",
-          e.message().c_str(), e.code());
-    }
-  } catch (const std::exception &e) {
-    log_warning("Updating the router attributes in metadata failed: %s",
-                e.what());
-  }
+  connection->execute(query);
 
   transaction.commit();
 
@@ -431,7 +417,7 @@ ClusterMetadata::auth_credentials_t ClusterMetadata::fetch_auth_credentials(
   return auth_credentials;
 }
 
-stdx::expected<metadata_cache::metadata_server_t, std::error_code>
+std::optional<metadata_cache::metadata_server_t>
 ClusterMetadata::find_rw_server(
     const std::vector<metadata_cache::ManagedInstance> &instances) {
   for (auto &instance : instances) {
@@ -440,8 +426,17 @@ ClusterMetadata::find_rw_server(
     }
   }
 
-  return stdx::make_unexpected(
-      make_error_code(metadata_cache::metadata_errc::no_rw_node_found));
+  return {};
+}
+
+std::optional<metadata_cache::metadata_server_t>
+ClusterMetadata::find_rw_server(
+    const std::vector<metadata_cache::ManagedCluster> &clusters) {
+  for (auto &cluster : clusters) {
+    if (cluster.is_primary) return find_rw_server(cluster.members);
+  }
+
+  return {};
 }
 
 /**
@@ -571,6 +566,8 @@ void set_instance_attributes(metadata_cache::ManagedInstance &instance,
                              const std::string &attributes) {
   std::string warning;
   auto &log_suppressor = LogSuppressor::instance();
+
+  instance.attributes = attributes;
 
   instance.hidden = get_hidden(attributes, warning);
   // we want to log the warning only when it's changing

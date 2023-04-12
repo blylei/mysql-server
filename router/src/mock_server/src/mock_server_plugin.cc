@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -40,12 +40,14 @@
 #include "mysql/harness/string_utils.h"  // split_string
 #include "mysql/harness/tls_context.h"
 #include "mysql/harness/tls_server_context.h"
+#include "mysql/harness/utility/string.h"
 #include "mysql_server_mock.h"
 #include "mysqlrouter/io_component.h"
 
 IMPORT_LOG_FUNCTIONS()
 
-static constexpr std::array<std::pair<const char *, mysql_ssl_mode>, 3>
+namespace {
+constexpr const std::array<std::pair<const char *, mysql_ssl_mode>, 3>
     allowed_ssl_modes = {{
         {"DISABLED", SSL_MODE_DISABLED},
         {"PREFERRED", SSL_MODE_PREFERRED},
@@ -54,43 +56,60 @@ static constexpr std::array<std::pair<const char *, mysql_ssl_mode>, 3>
 
 static constexpr const char kSectionName[]{"mock_server"};
 
-static mysql_ssl_mode get_option_ssl_mode(
-    const mysql_harness::ConfigSection *section,
-    const mysql_harness::ConfigOption &option) {
-  auto res = option.get_option_string(section);
-  if (!res) {
-    throw std::invalid_argument(res.error().message());
-  }
+class SslModeOption {
+ public:
+  mysql_ssl_mode operator()(const std::string &value,
+                            const std::string &option_desc) {
+    std::string name = value;
+    // convert name to upper-case to get case-insensitive comparison.
+    std::transform(value.begin(), value.end(), name.begin(), ::toupper);
 
-  // convert name to upper-case to get case-insenstive comparison.
-  auto name = res.value();
-  std::transform(name.begin(), name.end(), name.begin(), ::toupper);
-
-  // check if the mode is known
-  const auto it =
-      std::find_if(allowed_ssl_modes.begin(), allowed_ssl_modes.end(),
-                   [name](auto const &allowed_ssl_mode) {
-                     return name == allowed_ssl_mode.first;
-                   });
-  if (it != allowed_ssl_modes.end()) {
-    return it->second;
-  }
-
-  // build list of allowed modes, but don't mention the default case.
-  std::string allowed_names;
-  for (const auto &allowed_ssl_mode : allowed_ssl_modes) {
-    if (!allowed_names.empty()) {
-      allowed_names.append(",");
+    // check if the mode is known
+    const auto it =
+        std::find_if(allowed_ssl_modes.begin(), allowed_ssl_modes.end(),
+                     [name](auto const &allowed_ssl_mode) {
+                       return name == allowed_ssl_mode.first;
+                     });
+    if (it != allowed_ssl_modes.end()) {
+      return it->second;
     }
 
-    allowed_names += allowed_ssl_mode.first;
+    // build list of allowed modes, but don't mention the default case.
+    std::string allowed_names;
+    for (const auto &allowed_ssl_mode : allowed_ssl_modes) {
+      if (!allowed_names.empty()) {
+        allowed_names.append(",");
+      }
+
+      allowed_names += allowed_ssl_mode.first;
+    }
+
+    throw std::invalid_argument("invalid value '" + value + "' in option " +
+                                option_desc +
+                                ". Allowed values: " + allowed_names);
   }
+};
 
-  throw std::invalid_argument("invalid value '" + res.value() + "' for " +
-                              option.name() +
-                              ". Allowed are: " + allowed_names + ".");
-}
+class StringsOption {
+ public:
+  std::vector<std::string> operator()(const std::string &value,
+                                      const std::string & /* option_desc */) {
+    return mysql_harness::split_string(value, ',');
+  }
+};
+}  // namespace
 
+using mysql_harness::IntOption;
+using mysql_harness::StringOption;
+
+static constexpr std::array<const char *, 14> supported_options{
+    "filename", "module_prefix", "bind_address", "port",       "protocol",
+    "ssl_ca",   "ssl_capath",    "ssl_cert",     "ssl_key",    "ssl_cipher",
+    "ssl_crl",  "ssl_crlpath",   "ssl_mode",     "tls_version"};
+
+#define GET_OPTION_CHECKED(option, section, name, value)                    \
+  static_assert(mysql_harness::str_in_collection(supported_options, name)); \
+  option = get_option(section, name, value);
 class PluginConfig : public mysql_harness::BasePluginConfig {
  public:
   std::string trace_filename;
@@ -108,31 +127,26 @@ class PluginConfig : public mysql_harness::BasePluginConfig {
   mysql_ssl_mode ssl_mode;
   std::string tls_version;
 
-  std::vector<std::string> get_option_strings(
-      const mysql_harness::ConfigSection *section,
-      const std::string &option_name) {
-    auto val = get_option_string(section, option_name);
-
-    return mysql_harness::split_string(val, ',');
-  }
-
   explicit PluginConfig(const mysql_harness::ConfigSection *section)
-      : mysql_harness::BasePluginConfig(section),
-        trace_filename(get_option_string(section, "filename")),
-        module_prefixes(get_option_strings(section, "module_prefix")),
-        srv_address(get_option_string(section, "bind_address")),
-        srv_port(get_uint_option<uint16_t>(section, "port")),
-        srv_protocol(get_option_string(section, "protocol")),
-        ssl_ca(get_option_string(section, "ssl_ca")),
-        ssl_capath(get_option_string(section, "ssl_capath")),
-        ssl_cert(get_option_string(section, "ssl_cert")),
-        ssl_key(get_option_string(section, "ssl_key")),
-        ssl_cipher(get_option_string(section, "ssl_cipher")),
-        ssl_crl(get_option_string(section, "ssl_crl")),
-        ssl_crlpath(get_option_string(section, "ssl_crlpath")),
-        ssl_mode(get_option_ssl_mode(
-            section, mysql_harness::ConfigOption("ssl_mode", "disabled"))),
-        tls_version(get_option_string(section, "tls_version")) {}
+      : mysql_harness::BasePluginConfig(section) {
+    GET_OPTION_CHECKED(trace_filename, section, "filename", StringOption{});
+    std::string module_prefix_str;
+    GET_OPTION_CHECKED(module_prefix_str, section, "module_prefix",
+                       StringOption{});
+    module_prefixes.push_back(module_prefix_str);
+    GET_OPTION_CHECKED(srv_address, section, "bind_address", StringOption{});
+    GET_OPTION_CHECKED(srv_port, section, "port", IntOption<uint16_t>{});
+    GET_OPTION_CHECKED(srv_protocol, section, "protocol", StringOption{});
+    GET_OPTION_CHECKED(ssl_ca, section, "ssl_ca", StringOption{});
+    GET_OPTION_CHECKED(ssl_capath, section, "ssl_capath", StringOption{});
+    GET_OPTION_CHECKED(ssl_cert, section, "ssl_cert", StringOption{});
+    GET_OPTION_CHECKED(ssl_key, section, "ssl_key", StringOption{});
+    GET_OPTION_CHECKED(ssl_cipher, section, "ssl_cipher", StringOption{});
+    GET_OPTION_CHECKED(ssl_crl, section, "ssl_crl", StringOption{});
+    GET_OPTION_CHECKED(ssl_crlpath, section, "ssl_crlpath", StringOption{});
+    GET_OPTION_CHECKED(ssl_mode, section, "ssl_mode", SslModeOption{});
+    GET_OPTION_CHECKED(tls_version, section, "tls_version", StringOption{});
+  }
 
   std::string get_default(const std::string &option) const override {
     std::error_code ec;
@@ -328,13 +342,17 @@ mysql_harness::Plugin MOCK_SERVER_EXPORT harness_plugin_mock_server = {
     "Mock MySQL Server for testing",         // name
     VERSION_NUMBER(0, 0, 1),
     // requires
-    required.size(), required.data(),
+    required.size(),
+    required.data(),
     // conflicts
-    0, nullptr,
+    0,
+    nullptr,
     init,     // init
     deinit,   // deinit
     start,    // start
     nullptr,  // stop
     true,     // declares_readiness
+    supported_options.size(),
+    supported_options.data(),
 };
 }

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021, Oracle and/or its affiliates.
+  Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -120,7 +120,7 @@ TEST_P(BootstrapDebugLevelOkTest, BootstrapDebugLevelOk) {
   cmdline.push_back(overwrite_param);
   auto &router = launch_router_for_bootstrap(cmdline, EXIT_SUCCESS);
 
-  check_exit_code(router, EXIT_SUCCESS, 5s);
+  check_exit_code(router, EXIT_SUCCESS);
 
   // check that bootstrap outputs debug logs
   EXPECT_TRUE(router.output_contains(debug_level_output));
@@ -167,7 +167,7 @@ TEST_P(BootstrapOverwriteErrorTest, BootstrapOverwriteError) {
 
   auto &router = launch_router_for_bootstrap(cmdline, EXIT_FAILURE);
 
-  check_exit_code(router, EXIT_FAILURE, 5s);
+  check_exit_code(router, EXIT_FAILURE);
   EXPECT_TRUE(router.output_contains(param.expected_error_msg));
 }
 
@@ -201,7 +201,7 @@ class OverwriteLogLevelTest
  * overwrite works as expected */
 TEST_P(OverwriteLogLevelTest, OverwriteLogLevel) {
   const std::string debug_level_log_entry =
-      ".* main DEBUG .* Ready, signaling notify socket";
+      ".* main DEBUG .* Starting: keepalive.";
 
   const std::string keepalive_section = get_keepalive_section();
   const std::string conf_file =
@@ -277,7 +277,7 @@ TEST_F(RouterConfigOwerwriteTest, OverwriteLoggingFolder) {
 }
 
 /* @test Sunny-day scenario, we check that overwriting an option in the
- * configuration file with a commnad line parameter works */
+ * configuration file with a command line parameter works */
 TEST_F(RouterConfigOwerwriteTest, OverwriteRoutingPort) {
   const auto router_port = port_pool_.get_next_available();
   const auto server_port = port_pool_.get_next_available();
@@ -328,7 +328,7 @@ class OverwriteIgnoreUnknownOptionTest
       public ::testing::WithParamInterface<std::string> {};
 
 /* @test Non-existing option of a valid section is just ignored the same way it
- * is in the configuration file */
+ * is in the configuration file when unknown_config_option=warning */
 TEST_P(OverwriteIgnoreUnknownOptionTest, OverwriteIgnoreUnknownOption) {
   const auto router_port1 = port_pool_.get_next_available();
   const auto router_port2 = port_pool_.get_next_available();
@@ -345,7 +345,9 @@ TEST_P(OverwriteIgnoreUnknownOptionTest, OverwriteIgnoreUnknownOption) {
 
   launch_mysql_server_mock(simple_trace_file, server_port, EXIT_SUCCESS);
 
-  launch_router({"-c", conf_file, overwrite_param}, EXIT_SUCCESS, 5s);
+  launch_router({"-c", conf_file, overwrite_param,
+                 "--DEFAULT.unknown_config_option", "warning"},
+                EXIT_SUCCESS, 5s);
 
   make_new_connection_ok(router_port1, server_port);
 }
@@ -359,8 +361,8 @@ class OverwriteErrorTest
     : public RouterConfigOwerwriteTest,
       public ::testing::WithParamInterface<OverwriteErrorTestParam> {};
 
-/* @test Check that overwriten option is validated properly if it is used and is
- * not going to be ignored */
+/* @test Check that overwritten option is validated properly if it is used and
+ * is not going to be ignored */
 TEST_P(OverwriteErrorTest, OverwriteError) {
   auto default_section = get_DEFAULT_defaults();
   init_keyring(default_section, conf_dir.name());
@@ -379,7 +381,7 @@ TEST_P(OverwriteErrorTest, OverwriteError) {
   // logger issues will be reported on the console, the other in the logfile so
   // we merge them both when looking for error messages
   const std::string router_out =
-      router.get_full_logfile() + "\n" + router.get_full_output();
+      router.get_logfile_content() + "\n" + router.get_full_output();
   EXPECT_THAT(router_out, ::testing::HasSubstr(GetParam().expected_error_msg));
 }
 
@@ -405,7 +407,8 @@ INSTANTIATE_TEST_SUITE_P(
              "--routing:Main01.bind_address", "0.0.0.0",
              "--routing:Main01.routing_strategy", "first-available",
              "--routing:Main01.client_ssl_mode", "Yes"},
-            "Configuration error: invalid value 'Yes' for client_ssl_mode. "
+            "Configuration error: invalid value 'Yes' for option "
+            "client_ssl_mode in [routing:Main01]. "
             "Allowed are: DISABLED,PREFERRED,REQUIRED,PASSTHROUGH."},
         OverwriteErrorTestParam{
             {"--http_server.port=-5"},

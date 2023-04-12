@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+// Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License, version 2.0,
@@ -122,7 +122,8 @@ class WkbWriterTest : public ::testing::Test {
   WkbWriterTest() = default;
 
  private:
-  GTEST_DISALLOW_COPY_AND_ASSIGN_(WkbWriterTest);
+  WkbWriterTest(WkbWriterTest const &) = delete;
+  WkbWriterTest &operator=(WkbWriterTest const &) = delete;
 };
 
 TEST_F(WkbWriterTest, Point) {

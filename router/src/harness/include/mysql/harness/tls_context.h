@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -55,7 +55,7 @@ enum class TlsVersion { AUTO, SSL_3, TLS_1_0, TLS_1_1, TLS_1_2, TLS_1_3 };
 /**
  * Verification of Cerifiticates.
  *
- * NONE no certifcate is verified
+ * NONE no certificate is verified
  * PEER verify the cert of the peer
  */
 enum class TlsVerify { NONE, PEER };

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -90,7 +90,7 @@ Format_description_event::Format_description_event(uint8_t binlog_ver,
       common_header_len = LOG_EVENT_HEADER_LEN;
       number_of_event_types = LOG_EVENT_TYPES;
       /**
-        This will be used to initialze the post_header_len,
+        This will be used to initialize the post_header_len,
         for binlog version 4.
       */
       static uint8_t server_event_header_length[] = {
@@ -348,6 +348,12 @@ XA_prepare_event::XA_prepare_event(const char *buf,
   BAPI_VOID_RETURN;
 }
 
+bool XA_prepare_event::is_one_phase() const { return this->one_phase; }
+
+XA_prepare_event::MY_XID const &XA_prepare_event::get_xid() const {
+  return this->my_xid;
+}
+
 Transaction_payload_event::Transaction_payload_event(const char *payload,
                                                      uint64_t payload_size,
                                                      uint16_t compression_type,
@@ -441,6 +447,8 @@ Gtid_event::Gtid_event(const char *buf, const Format_description_event *fde)
     |1 to 9 bytes| transaction_length (see net_length_size())
     +------------+
     |   4/8 bytes| original/immediate_server_version (see timestamps*)
+    +------------+
+    |     8 bytes| Commit group ticket
     +------------+
 
     The 'Flags' field contains gtid flags.
@@ -552,6 +560,10 @@ Gtid_event::Gtid_event(const char *buf, const Format_description_event *fde)
                            ORIGINAL_SERVER_VERSION_LENGTH);
           } else
             original_server_version = immediate_server_version;
+
+          if (READER_CALL(can_read, COMMIT_GROUP_TICKET_LENGTH)) {
+            READER_TRY_SET(this->commit_group_ticket, read<uint64_t>);
+          }
         }
       }
     }
@@ -559,6 +571,26 @@ Gtid_event::Gtid_event(const char *buf, const Format_description_event *fde)
 
   READER_CATCH_ERROR;
   BAPI_VOID_RETURN;
+}
+
+int Gtid_event::get_commit_group_ticket_length() const {
+  if (kGroupTicketUnset != commit_group_ticket) {
+    return COMMIT_GROUP_TICKET_LENGTH;
+  }
+  return 0;
+}
+
+void Gtid_event::set_commit_group_ticket_and_update_transaction_length(
+    std::uint64_t value) {
+  /*
+    Add the commit_group_ticket length to the transaction length if
+    it was not yet considered.
+  */
+  assert(value > 0);
+  set_trx_length(transaction_length + (kGroupTicketUnset == commit_group_ticket
+                                           ? COMMIT_GROUP_TICKET_LENGTH
+                                           : 0));
+  commit_group_ticket = value;
 }
 
 Previous_gtids_event::Previous_gtids_event(const char *buffer,

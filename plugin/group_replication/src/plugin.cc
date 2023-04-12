@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -57,12 +57,12 @@
 using std::string;
 
 /*
-  Variables that are only acessible inside plugin.cc.
+  Variables that are only accessible inside plugin.cc.
 */
 static struct plugin_local_variables lv;
 
 /*
-  Plugin options variables that are only acessible inside plugin.cc.
+  Plugin options variables that are only accessible inside plugin.cc.
 */
 static struct plugin_options_variables ov;
 
@@ -75,12 +75,11 @@ SERVICE_TYPE(log_builtins_string) * log_bs;
 /*
   Plugin modules.
 
-  plugin.cc class pointers that are acessible on all plugin files,
+  plugin.cc class pointers that are accessible on all plugin files,
   that is, are declared as extern on plugin.h.
   These pointers will be initialized on plugin_group_replication_init()
   or plugin_group_replication_start().
 */
-constexpr gr_modules::mask gr_modules::all_modules;
 /** The plugin applier */
 Applier_module *applier_module = nullptr;
 /** The plugin recovery module */
@@ -126,6 +125,15 @@ Advertised_recovery_endpoints *advertised_recovery_endpoints = nullptr;
 Member_actions_handler *member_actions_handler = nullptr;
 /** Handle tasks on mysql_thread */
 Mysql_thread *mysql_thread_handler = nullptr;
+/**
+  Dedicated mysql_thread to enable `read_only` and `super_read_only`
+  since these are blocking operations.
+  If we did use `mysql_thread_handler` that would block all other
+  other operations until read modes operations complete.
+*/
+Mysql_thread *mysql_thread_handler_read_only_mode = nullptr;
+/** Module with the acquired server services on plugin install */
+Server_services_references *server_services_references_module = nullptr;
 
 Plugin_gcs_events_handler *events_handler = nullptr;
 Plugin_gcs_view_modification_notifier *view_change_notifier = nullptr;
@@ -678,8 +686,17 @@ int initialize_plugin_and_join(
   bool read_only_mode = false, super_read_only_mode = false;
   bool write_set_limits_set = false;
 
-  Sql_service_command_interface *sql_command_interface =
-      new Sql_service_command_interface();
+  /*
+    Despite START GROUP_REPLICATION do not depend on the SQL API,
+    other operations, like distributed recovery through clone, do
+    depend, as such we do validate early that SQL API is operational.
+  */
+  Sql_service_command_interface sql_command_interface;
+  if (sql_command_interface.establish_session_connection(
+          sql_api_isolation, GROUPREPL_USER, lv.plugin_info_ptr)) {
+    error = 1;
+    goto err;
+  }
 
   /**
     We redo the check for the group name here when starting on boot as only
@@ -708,15 +725,7 @@ int initialize_plugin_and_join(
   // GCS interface.
   if ((error = gcs_module->initialize())) goto err; /* purecov: inspected */
 
-  // Setup SQL service interface.
-  if (sql_command_interface->establish_session_connection(
-          sql_api_isolation, GROUPREPL_USER, lv.plugin_info_ptr)) {
-    error = 1; /* purecov: inspected */
-    goto err;  /* purecov: inspected */
-  }
-
-  get_read_mode_state(sql_command_interface, &read_only_mode,
-                      &super_read_only_mode);
+  get_read_mode_state(&read_only_mode, &super_read_only_mode);
 
   /*
    At this point in the code, set the super_read_only mode here on the
@@ -725,7 +734,7 @@ int initialize_plugin_and_join(
    deadlock issues.
   */
   if (!lv.plugin_is_auto_starting_on_install) {
-    if (enable_super_read_only_mode(sql_command_interface)) {
+    if (enable_server_read_mode()) {
       /* purecov: begin inspected */
       error = 1;
       LogPluginErr(ERROR_LEVEL,
@@ -844,8 +853,7 @@ err:
 
     if (!lv.server_shutdown_status && server_engine_initialized() &&
         enabled_super_read_only) {
-      set_read_mode_state(sql_command_interface, read_only_mode,
-                          super_read_only_mode);
+      set_read_mode_state(read_only_mode, super_read_only_mode);
     }
 
     assert(transactions_latch->empty());
@@ -858,7 +866,6 @@ err:
     }
   }
 
-  delete sql_command_interface;
   lv.plugin_is_auto_starting_on_install = false;
 
   return error;
@@ -924,6 +931,8 @@ int configure_group_member_manager() {
                   { local_version = 0x080012; };);
   DBUG_EXECUTE_IF("group_replication_legacy_election_version2",
                   { local_version = 0x080015; };);
+  DBUG_EXECUTE_IF("group_replication_version_8_0_28",
+                  { local_version = 0x080028; };);
   Member_version local_member_plugin_version(local_version);
   DBUG_EXECUTE_IF("group_replication_force_member_uuid", {
     uuid = const_cast<char *>("cccccccc-cccc-cccc-cccc-cccccccccccc");
@@ -967,6 +976,7 @@ int configure_group_member_manager() {
   // Create the membership info visible for the group
   else
     group_member_mgr = new Group_member_info_manager(local_member_info);
+
   lv.group_member_mgr_configured = true;
 
   LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_MEMBER_CONF_INFO, get_server_id(),
@@ -1254,7 +1264,7 @@ int plugin_group_replication_stop(char **error_message) {
   // Enable super_read_only.
   if (!lv.server_shutdown_status && !lv.plugin_is_being_uninstalled &&
       server_engine_initialized()) {
-    if (enable_server_read_mode(PSESSION_DEDICATED_THREAD)) {
+    if (enable_server_read_mode()) {
       /* purecov: begin inspected */
       LogPluginErr(ERROR_LEVEL,
                    ER_GRP_RPL_FAILED_TO_ENABLE_READ_ONLY_MODE_ON_SHUTDOWN);
@@ -1296,20 +1306,6 @@ int initialize_plugin_modules(gr_modules::mask modules_to_init) {
                   { lv.rejoin_timeout = 1ULL; };);
   DBUG_EXECUTE_IF("group_replication_rejoin_long_retry",
                   { lv.rejoin_timeout = 60ULL; };);
-
-  /*
-    Mysql thread handler.
-  */
-  if (modules_to_init[gr_modules::MYSQL_THREAD_HANDLER]) {
-    mysql_thread_handler = new Mysql_thread(
-        key_GR_THD_mysql_thread_handler, key_GR_LOCK_mysql_thread_handler_run,
-        key_GR_COND_mysql_thread_handler_run,
-        key_GR_LOCK_mysql_thread_handler_dispatcher_run,
-        key_GR_COND_mysql_thread_handler_dispatcher_run);
-    if (mysql_thread_handler->initialize()) {
-      return GROUP_REPLICATION_CONFIGURATION_ERROR;
-    }
-  }
 
   /*
     Registry module.
@@ -1482,7 +1478,7 @@ int terminate_plugin_modules(gr_modules::mask modules_to_terminate,
       gcs_module->remove_view_notifer(view_change_notifier);
     }
 
-    // Also, we must terminate the GCS infrastructure completly.
+    // Also, we must terminate the GCS infrastructure completely.
     if (gcs_module->is_initialized()) gcs_module->finalize();
   }
 
@@ -1666,17 +1662,6 @@ int terminate_plugin_modules(gr_modules::mask modules_to_terminate,
     }
   }
 
-  /*
-    Mysql thread handler.
-  */
-  if (modules_to_terminate[gr_modules::MYSQL_THREAD_HANDLER]) {
-    if (nullptr != mysql_thread_handler) {
-      mysql_thread_handler->terminate();
-      delete mysql_thread_handler;
-      mysql_thread_handler = nullptr;
-    }
-  }
-
   return error;
 }
 
@@ -1697,7 +1682,6 @@ bool attempt_rejoin() {
   modules_mask.set(gr_modules::GCS_EVENTS_HANDLER, true);
   modules_mask.set(gr_modules::REMOTE_CLONE_HANDLER, true);
   modules_mask.set(gr_modules::MEMBER_ACTIONS_HANDLER, true);
-  modules_mask.set(gr_modules::MYSQL_THREAD_HANDLER, true);
   modules_mask.set(gr_modules::MESSAGE_SERVICE_HANDLER, true);
   modules_mask.set(gr_modules::BINLOG_DUMP_THREAD_KILL, true);
   modules_mask.set(gr_modules::RECOVERY_MODULE, true);
@@ -1871,6 +1855,66 @@ end:
   return ret;
 }
 
+void mysql_thread_handler_finalize() {
+  if (nullptr != mysql_thread_handler_read_only_mode) {
+    mysql_thread_handler_read_only_mode->terminate();
+    delete mysql_thread_handler_read_only_mode;
+    mysql_thread_handler_read_only_mode = nullptr;
+  }
+
+  if (nullptr != mysql_thread_handler) {
+    mysql_thread_handler->terminate();
+    delete mysql_thread_handler;
+    mysql_thread_handler = nullptr;
+  }
+}
+
+bool mysql_thread_handler_initialize() {
+  mysql_thread_handler = new Mysql_thread(
+      key_GR_THD_mysql_thread_handler, key_GR_LOCK_mysql_thread_handler_run,
+      key_GR_COND_mysql_thread_handler_run,
+      key_GR_LOCK_mysql_thread_handler_dispatcher_run,
+      key_GR_COND_mysql_thread_handler_dispatcher_run);
+  bool error = mysql_thread_handler->initialize();
+
+  mysql_thread_handler_read_only_mode = new Mysql_thread(
+      key_GR_THD_mysql_thread_handler_read_only_mode,
+      key_GR_LOCK_mysql_thread_handler_read_only_mode_run,
+      key_GR_COND_mysql_thread_handler_read_only_mode_run,
+      key_GR_LOCK_mysql_thread_handler_read_only_mode_dispatcher_run,
+      key_GR_COND_mysql_thread_handler_read_only_mode_dispatcher_run);
+  error |= mysql_thread_handler_read_only_mode->initialize();
+
+  if (error) {
+    LogPluginErr(
+        ERROR_LEVEL, ER_GRP_RPL_ERROR_MSG,
+        "Failed to initialize Group Replication mysql thread handlers.");
+    mysql_thread_handler_finalize();
+  }
+
+  return error;
+}
+
+void server_services_references_finalize() {
+  if (nullptr != server_services_references_module) {
+    server_services_references_module->finalize();
+    delete server_services_references_module;
+    server_services_references_module = nullptr;
+  }
+}
+
+bool server_services_references_initialize() {
+  server_services_references_module = new Server_services_references();
+  bool error = server_services_references_module->initialize();
+  if (error) {
+    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_ERROR_MSG,
+                 "Failed to acquire the required server services.");
+    server_services_references_finalize();
+  }
+
+  return error;
+}
+
 int plugin_group_replication_init(MYSQL_PLUGIN plugin_info) {
   // Initialize plugin local variables.
   lv.init();
@@ -1890,6 +1934,13 @@ int plugin_group_replication_init(MYSQL_PLUGIN plugin_info) {
   mysql_runtime_error_service =
       reinterpret_cast<SERVICE_TYPE_NO_CONST(mysql_runtime_error) *>(
           h_mysql_runtime_error_service);
+
+  /*
+    Acquire required server services once at plugin install.
+  */
+  if (server_services_references_initialize()) {
+    return 1;
+  }
 
 // Register all PSI keys at the time plugin init
 #ifdef HAVE_PSI_INTERFACE
@@ -1983,6 +2034,16 @@ int plugin_group_replication_init(MYSQL_PLUGIN plugin_info) {
   member_actions_handler = new Member_actions_handler();
   consensus_leaders_handler =
       new Consensus_leaders_handler{*group_events_observation_manager};
+
+  /*
+    We do query super_read_only value while Group Replication is stopped,
+    on example is the `group_replication_enable_member_action` UDF, as such,
+    we need to initialize the mysql_thread used on `Get_system_variable`
+    on plugin install.
+  */
+  if (mysql_thread_handler_initialize()) {
+    return 1;
+  }
 
   bool const error = register_udfs();
   if (error) return 1;
@@ -2141,6 +2202,7 @@ int plugin_group_replication_deinit(void *p) {
 
   unregister_udfs();
   sql_service_interface_deinit();
+  mysql_thread_handler_finalize();
 
   delete member_actions_handler;
   member_actions_handler = nullptr;
@@ -2166,6 +2228,8 @@ int plugin_group_replication_deinit(void *p) {
   lv.online_wait_mutex = nullptr;
 
   lv.plugin_info_ptr = nullptr;
+
+  server_services_references_finalize();
 
   // Deinitialize runtime error service.
   my_h_service h_mysql_runtime_error_service =
@@ -2342,6 +2406,11 @@ int terminate_applier_module() {
       error = GROUP_REPLICATION_APPLIER_STOP_TIMEOUT;
     }
   }
+  /*
+    Since GR is being stopped we can disable the guarantee that the
+    binlog commit order will follow the order instructed by GR.
+  */
+  Commit_stage_manager::disable_manual_session_tickets();
   return error;
 }
 
@@ -3539,11 +3608,16 @@ static int check_force_members(MYSQL_THD thd, SYS_VAR *, void *save,
   const char *str = nullptr;
   (*(const char **)save) = nullptr;
   int length = 0;
+  Gcs_operations::enum_force_members_state force_members_error =
+      Gcs_operations::FORCE_MEMBERS_OK;
 
   // Only one set force_members can run at a time.
   mysql_mutex_lock(&lv.force_members_running_mutex);
   if (lv.force_members_running) {
-    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_SUPPORTS_ONLY_ONE_FORCE_MEMBERS_SET);
+    my_error(ER_GROUP_REPLICATION_FORCE_MEMBERS_COMMAND_FAILURE, MYF(0),
+             "value",
+             "There is one group_replication_force_members operation "
+             "already ongoing.");
     mysql_mutex_unlock(&lv.force_members_running_mutex);
     return 1;
   }
@@ -3571,14 +3645,50 @@ static int check_force_members(MYSQL_THD thd, SYS_VAR *, void *save,
 
   // if group replication isn't running and majority is reachable you can't
   // update force_members
-  if (!plugin_is_group_replication_running() ||
-      !group_member_mgr->is_majority_unreachable()) {
-    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_FORCE_MEMBERS_SET_UPDATE_NOT_ALLOWED);
+  if (!plugin_is_group_replication_running()) {
+    force_members_error = Gcs_operations::FORCE_MEMBERS_ER_MEMBER_NOT_ONLINE;
+  } else if (!group_member_mgr->is_majority_unreachable()) {
+    force_members_error =
+        Gcs_operations::FORCE_MEMBERS_ER_NOT_ONLINE_AND_MAJORITY_UNREACHABLE;
+  } else {
+    force_members_error = gcs_module->force_members(str);
+  }
+
+  if (force_members_error != Gcs_operations::FORCE_MEMBERS_OK) {
+    std::stringstream ss;
+    switch (force_members_error) {
+      case Gcs_operations::FORCE_MEMBERS_ER_NOT_ONLINE_AND_MAJORITY_UNREACHABLE:
+        ss << "The group_replication_force_members can only be updated when "
+           << "Group Replication is running and majority of the members are "
+           << "unreachable.";
+        break;
+      case Gcs_operations::FORCE_MEMBERS_ER_MEMBER_NOT_ONLINE:
+        ss << "Member is not ONLINE, it is not possible to force a new "
+           << "group membership.";
+        break;
+      case Gcs_operations::FORCE_MEMBERS_ER_MEMBERS_WHEN_LEAVING:
+        ss << "A request to force a new group membership was issued "
+           << "while the member is leaving the group.";
+        break;
+      case Gcs_operations::FORCE_MEMBERS_ER_TIMEOUT_ON_WAIT_FOR_VIEW:
+        ss << "Timeout on wait for view after setting "
+           << "group_replication_force_members.";
+        break;
+      case Gcs_operations::FORCE_MEMBERS_ER_VALUE_SET_ERROR:
+        ss << "Error setting group_replication_force_members value '" << str
+           << "'. Please check error log for additional details.";
+        break;
+      case Gcs_operations::FORCE_MEMBERS_ER_INTERNAL_ERROR:
+      default:
+        ss << "Please check error log for additional details.";
+        break;
+    }
+
+    my_error(ER_GROUP_REPLICATION_FORCE_MEMBERS_COMMAND_FAILURE, MYF(0), str,
+             ss.str().c_str());
     error = 1;
     goto end;
   }
-
-  if ((error = gcs_module->force_members(str))) goto end;
 
 update_value:
   *(const char **)save = str;
@@ -3805,13 +3915,20 @@ static int check_member_weight(MYSQL_THD, SYS_VAR *, void *save,
   longlong in_val;
   value->val_int(value, &in_val);
 
-  if (plugin_is_group_replication_running() &&
-      group_action_coordinator->is_group_action_running()) {
-    my_message(ER_WRONG_VALUE_FOR_VAR,
-               "The member weight for primary elections cannot be changed "
-               "during group configuration changes.",
-               MYF(0));
-    return 1;
+  if (plugin_is_group_replication_running()) {
+    std::pair<std::string, std::string> action_initiator_and_description;
+    if (group_action_coordinator->is_group_action_running(
+            action_initiator_and_description)) {
+      std::string message(
+          "The member weight for primary elections cannot be changed while "
+          "group configuration operation '");
+      message.append(action_initiator_and_description.second);
+      message.append("' is running initiated by '");
+      message.append(action_initiator_and_description.first);
+      message.append("'.");
+      my_message(ER_WRONG_VALUE_FOR_VAR, message.c_str(), MYF(0));
+      return 1;
+    }
   }
 
   *(uint *)save =
@@ -4653,7 +4770,7 @@ static MYSQL_SYSVAR_BOOL(
     ov.enforce_update_everywhere_checks_var, /* var */
     PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_NODEFAULT |
         PLUGIN_VAR_PERSIST_AS_READ_ONLY, /* optional var | no set default */
-    "Enable/Disable strict consistency checks for multi-master "
+    "Enable/Disable strict consistency checks for multi-primary "
     "update everywhere. Default: FALSE.",
     check_enforce_update_everywhere_checks, /* check func*/
     nullptr,                                /* update func*/

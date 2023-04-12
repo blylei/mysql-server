@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2009, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,6 +49,8 @@ struct AllocMemReq
   Uint32 bytes_lo;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_ALLOC_MEM_REQ, Local);
+
 struct AllocMemRef
 {
   static constexpr Uint32 SignalLength = 4;
@@ -58,6 +60,8 @@ struct AllocMemRef
   Uint32 requestInfo;
   Uint32 errorCode;
 };
+
+DECLARE_SIGNAL_SCOPE(GSN_ALLOC_MEM_REF, Local);
 
 struct AllocMemConf
 {
@@ -70,6 +74,7 @@ struct AllocMemConf
   Uint32 bytes_lo;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_ALLOC_MEM_CONF, Local);
 
 #undef JAM_FILE_ID
 

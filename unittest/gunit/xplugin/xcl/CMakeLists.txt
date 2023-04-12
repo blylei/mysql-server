@@ -1,4 +1,4 @@
-# Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+# Copyright (c) 2020, 2022, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -41,9 +41,13 @@ IF(HAS_WARN_FLAG)
   STRING_APPEND(CMAKE_CXX_FLAGS " ${HAS_WARN_FLAG}")
 ENDIF()
 
-MY_ADD_COMPILE_DEFINITIONS(${XCL_TEST_SRC}
-  COMPILE_DEFINITIONS USE_MYSQLX_FULL_PROTO
-)
+# Fixes "C1128: number of sections exceeded object file format limit" in MSVC
+IF(MSVC)
+  ADD_COMPILE_FLAGS(
+    mock/mock.cc
+    COMPILE_FLAGS "/bigobj"
+    )
+ENDIF()
 
 MYSQL_ADD_EXECUTABLE(${XCL_UNIT_TESTS}
   ../test_main.cc

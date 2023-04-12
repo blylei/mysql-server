@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -73,7 +73,15 @@ class Digest {
    *
    * Allows reused of the Digest function without reallocating memory.
    */
-  void reinit() { EVP_DigestInit(ctx_.get(), Digest::get_evp_md(type_)); }
+  void reinit() {
+#if defined(OPENSSL_VERSION_NUMBER) && \
+    (OPENSSL_VERSION_NUMBER >= ROUTER_OPENSSL_VERSION(1, 1, 0))
+    EVP_MD_CTX_reset(ctx_.get());
+#else
+    EVP_MD_CTX_cleanup(ctx_.get());
+#endif
+    EVP_DigestInit(ctx_.get(), Digest::get_evp_md(type_));
+  }
 
   /**
    * update Digest.

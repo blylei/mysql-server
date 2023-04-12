@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2015, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 #ifndef DD__SDI_INCLUDED
 #define DD__SDI_INCLUDED
 
+#include <cstdint>
 #include <functional>
 #include "my_compiler.h"
 #include "sql/dd/sdi_fwd.h"      // RJ_Document
@@ -145,7 +146,7 @@ Sdi_type serialize(const Tablespace &tablespace);
 
 /**
    Type alias for std::function wrapping a callable to check if
-   SDI, as an RJ_Document, is compatible. Normale MySQL error handling.
+   SDI, as an RJ_Document, is compatible. Normal MySQL error handling.
    Return value: false => success, true => error in DA.
 */
 using SdiCompatibilityChecker = std::function<bool(const RJ_Document &)>;

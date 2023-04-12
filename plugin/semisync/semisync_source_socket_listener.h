@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2016, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -51,8 +51,8 @@ class Poll_socket_listener {
         Do not consider the slave's socket
         if the slave is in the process of leaving.
       */
-      if (slaves[i].is_leaving) {
-        slaves[i].is_leaving = false;
+      if (slaves[i].m_status != Slave::EnumStatus::up) {
+        slaves[i].m_status = Slave::EnumStatus::down;
         continue;
       }
       pollfd poll_fd;
@@ -105,8 +105,8 @@ class Select_socket_listener {
         Do not consider the slave's socket
         if the slave is in the process of leaving.
       */
-      if (slaves[i].is_leaving) {
-        slaves[i].is_leaving = false;
+      if (slaves[i].m_status != Slave::EnumStatus::up) {
+        slaves[i].m_status = Slave::EnumStatus::down;
         continue;
       }
       my_socket socket_id = slaves[i].sock_fd();

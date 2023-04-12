@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -98,7 +98,7 @@ void NdbThread_Destroy(struct NdbThread** p_thread);
  *
  * * p_wait_thread, pointer to the thread to wait for
  * * status: exit code from thread waited for
- * * returnvalue: true = succeded, false = failed
+ * * returnvalue: true = succeeded, false = failed
  */
 int NdbThread_WaitFor(struct NdbThread* p_wait_thread, void** status);      
 

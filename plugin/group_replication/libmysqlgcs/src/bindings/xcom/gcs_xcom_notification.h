@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2017, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -362,7 +362,7 @@ class Data_notification : public Parameterized_notification<false> {
  private:
   /**
     Task implemented by this notification which calls the functor
-    with the parameters provided in the contructor.
+    with the parameters provided in the constructor.
   */
 
   void do_execute() override;

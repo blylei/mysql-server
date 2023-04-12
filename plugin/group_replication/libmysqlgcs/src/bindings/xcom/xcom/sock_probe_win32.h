@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2010, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -135,7 +135,7 @@ static int number_of_interfaces(sock_probe *s) {
 }
 
 /* Return TRUE if interface #count is running. */
-static bool_t is_if_running(sock_probe *s, int count) {
+static bool_t is_if_running(sock_probe *s, int /* count */) {
   if (s == NULL) {
     return 0;
   }
@@ -194,7 +194,6 @@ static interface_info get_interface(sock_probe *s, int count) {
  */
 static void get_sockaddr(sock_probe *s, int count, struct sockaddr **out,
                          SockaddrOp addr_operation) {
-  int i = 0;
   interface_info interface_info;
 
   if (s == NULL) {

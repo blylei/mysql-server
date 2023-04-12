@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, Oracle and/or its affiliates.
+Copyright (c) 2021, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -28,8 +28,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <thread>
 
 #ifdef RAPIDJSON_NO_SIZETYPEDEFINE
-// if we build within the server, it will set RAPIDJSON_NO_SIZETYPEDEFINE
-// globally and require to include my_rapidjson_size_t.h
 #include "my_rapidjson_size_t.h"
 #endif
 
@@ -41,13 +39,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <rapidjson/schema.h>
 #include <rapidjson/stringbuffer.h>
 
+#include "config_builder.h"
 #include "keyring/keyring_manager.h"
 #include "mock_server_rest_client.h"
 #include "mock_server_testutils.h"
+#include "mysql/harness/utility/string.h"  // join
 #include "mysqlrouter/cluster_metadata.h"
 #include "mysqlrouter/mysql_session.h"
 #include "mysqlrouter/rest_client.h"
 #include "mysqlrouter/utils.h"
+#include "rest_api_testutils.h"
 #include "router_component_clusterset.h"
 #include "router_component_test.h"
 #include "router_component_testutils.h"
@@ -57,49 +58,47 @@ using mysqlrouter::ClusterType;
 using mysqlrouter::MySQLSession;
 using ::testing::PrintToString;
 using namespace std::chrono_literals;
+using namespace std::string_literals;
 
 Path g_origin_path;
 
 class ClusterSetTest : public RouterComponentClusterSetTest {
  protected:
-  void SetUp() override { RouterComponentTest::SetUp(); }
-
-  std::string get_metadata_cache_section(
-      const std::chrono::milliseconds ttl = kTTL,
-      const std::string &cluster_type_str = "gr") {
+  std::string metadata_cache_section(const std::chrono::milliseconds ttl = kTTL,
+                                     bool use_gr_notifications = false) {
     auto ttl_str = std::to_string(std::chrono::duration<double>(ttl).count());
 
-    return "[metadata_cache:test]\n"
-           "cluster_type=" +
-           cluster_type_str +
-           "\n"
-           "router_id=1\n" +
-           "user=mysql_router1_user\n"
-           "metadata_cluster=test\n"
-           "connect_timeout=1\n"
-           "ttl=" +
-           ttl_str + "\n\n";
+    return mysql_harness::ConfigBuilder::build_section(
+        "metadata_cache:test",
+        {{"cluster_type", "gr"},
+         {"router_id", "1"},
+         {"user", "mysql_router1_user"},
+         {"metadata_cluster", "test"},
+         {"connect_timeout", "1"},
+         {"ttl", ttl_str},
+         {"use_gr_notifications", use_gr_notifications ? "1" : "0"}});
   }
 
-  std::string get_metadata_cache_routing_section(uint16_t router_port,
-                                                 const std::string &role,
-                                                 const std::string &strategy) {
-    std::string result =
-        "[routing:test_default" + std::to_string(router_port) +
-        "]\n"
-        "bind_port=" +
-        std::to_string(router_port) + "\n" +
-        "destinations=metadata-cache://test/default?role=" + role +
-        /*disconnect_rules +*/ "\n" + "protocol=classic\n";
+  std::string routing_section(uint16_t router_port, const std::string &role,
+                              const std::string &strategy) {
+    std::map<std::string, std::string> options{
+        {"bind_port", std::to_string(router_port)},
+        {"destinations", "metadata-cache://test/default?role=" + role},
+        {"protocol", "classic"}};
 
-    if (!strategy.empty())
-      result += std::string("routing_strategy=" + strategy + "\n");
+    if (!strategy.empty()) {
+      options["routing_strategy"] = strategy;
+    }
 
-    return result;
+    return mysql_harness::ConfigBuilder::build_section(
+        "routing:test_default" + std::to_string(router_port), options);
   }
 
-  auto &launch_router(int expected_errorcode = EXIT_SUCCESS,
-                      std::chrono::milliseconds wait_for_notify_ready = 10s) {
+  auto &launch_router(const int expected_errorcode = EXIT_SUCCESS,
+                      const std::chrono::milliseconds wait_for_notify_ready =
+                          kReadyNotifyTimeout,
+                      const std::chrono::milliseconds metadata_ttl = kTTL,
+                      bool use_gr_notifications = false) {
     SCOPED_TRACE("// Prepare the dynamic state file for the Router");
     const auto clusterset_all_nodes_ports =
         clusterset_data_.get_all_nodes_classic_ports();
@@ -110,13 +109,9 @@ class ClusterSetTest : public RouterComponentClusterSetTest {
                                                     /*view_id*/ 1));
 
     SCOPED_TRACE("// Prepare the config file for the Router");
-    const std::string metadata_cache_section = get_metadata_cache_section(kTTL);
     router_port_rw = port_pool_.get_next_available();
     router_port_ro = port_pool_.get_next_available();
-    const std::string routing_section_rw = get_metadata_cache_routing_section(
-        router_port_rw, "PRIMARY", "first-available");
-    const std::string routing_section_ro = get_metadata_cache_routing_section(
-        router_port_ro, "SECONDARY", "round-robin");
+
     const std::string masterkey_file =
         Path(temp_test_dir.name()).join("master.key").str();
     const std::string keyring_file =
@@ -127,24 +122,32 @@ class ClusterSetTest : public RouterComponentClusterSetTest {
     mysql_harness::flush_keyring();
     mysql_harness::reset_keyring();
 
-    // launch the router with metadata-cache configuration
     auto default_section = get_DEFAULT_defaults();
     default_section["keyring_path"] = keyring_file;
     default_section["master_key_path"] = masterkey_file;
     default_section["dynamic_state"] = router_state_file;
+
+    const std::string userfile = create_password_file();
+    const std::string rest_sections = mysql_harness::join(
+        get_restapi_config("rest_metadata_cache", userfile, true), "\n");
+
     router_conf_file = create_config_file(
         temp_test_dir.name(),
-        metadata_cache_section + routing_section_rw + routing_section_ro,
+        metadata_cache_section(metadata_ttl, use_gr_notifications) +
+            routing_section(router_port_rw, "PRIMARY", "first-available") +
+            routing_section(router_port_ro, "SECONDARY", "round-robin") +
+            rest_sections,
         &default_section);
     auto &router = ProcessManager::launch_router(
         {"-c", router_conf_file}, expected_errorcode, /*catch_stderr=*/true,
         /*with_sudo=*/false, wait_for_notify_ready);
+
     return router;
   }
 
   auto &relaunch_router(const std::string &conf_file,
                         int expected_errorcode = EXIT_SUCCESS,
-                        std::chrono::milliseconds wait_for_notify_ready = 10s) {
+                        std::chrono::milliseconds wait_for_notify_ready = 30s) {
     auto &router = ProcessManager::launch_router(
         {"-c", conf_file}, expected_errorcode, /*catch_stderr=*/true,
         /*with_sudo=*/false, wait_for_notify_ready);
@@ -158,11 +161,33 @@ class ClusterSetTest : public RouterComponentClusterSetTest {
     return get_int_field_value(server_globals, name);
   }
 
+  void set_fetch_whole_topology(bool value) {
+    const std::string metadata_cache_section_name = "test";
+    const std::string path = std::string(rest_api_basepath) + "/metadata/" +
+                             metadata_cache_section_name + "/config";
+    ASSERT_TRUE(wait_for_rest_endpoint_ready(path, http_port_, kRestApiUsername,
+                                             kRestApiPassword));
+
+    const std::string parameter = "fetchWholeTopology="s + (value ? "1" : "0");
+
+    IOContext io_ctx;
+    RestClient rest_client(io_ctx, "127.0.0.1", http_port_, kRestApiUsername,
+                           kRestApiPassword);
+
+    auto req =
+        rest_client.request_sync(HttpMethod::Get, path + "?" + parameter);
+
+    ASSERT_TRUE(req) << "HTTP Request failed (early): " << req.error_msg()
+                     << std::endl;
+    ASSERT_GT(req.get_response_code(), 0u)
+        << "HTTP Request failed: " << req.error_msg() << std::endl;
+  }
+
   // @brief wait until global read from the mock server is greater or equal
-  // epxected threashold
-  // @retval true selected global is greated or equal expectred threashold
-  // @retval false timed out waiting for selectged global to become greater or
-  // equal expected threashold
+  // expected threashold
+  // @retval true selected global is greater or equal to expected threshold
+  // @retval false timed out waiting for selected global to become greater or
+  // equal to expected threshold
   bool wait_global_ge(const uint16_t http_port, const std::string &name,
                       int threashold, std::chrono::milliseconds timeout = 15s) {
     const auto kStep = 100ms;
@@ -182,7 +207,7 @@ class ClusterSetTest : public RouterComponentClusterSetTest {
     using NodeId = std::pair<unsigned, unsigned>;
     std::map<NodeId, size_t> count;
 
-    // in the first run pick up how many times the last_check_in updte was
+    // in the first run pick up how many times the last_check_in update was
     // performed on each node so far
     for (const auto &cluster : clusterset_data_.clusters) {
       unsigned node_id = 0;
@@ -236,6 +261,7 @@ class ClusterSetTest : public RouterComponentClusterSetTest {
   uint16_t router_port_ro;
 
   static const std::chrono::milliseconds kTTL;
+  static const std::chrono::seconds kReadyNotifyTimeout;
   static const unsigned kRWNodeId = 0;
   static const unsigned kRONodeId = 1;
 
@@ -245,6 +271,7 @@ class ClusterSetTest : public RouterComponentClusterSetTest {
 };
 
 const std::chrono::milliseconds ClusterSetTest::kTTL = 50ms;
+const std::chrono::seconds ClusterSetTest::kReadyNotifyTimeout = 30s;
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -337,7 +364,7 @@ struct TargetClusterChangeInMetataTestParams {
   // and the expected connections destinations for that cluster
   TargetClusterTestParams changed_target_cluster;
 
-  // wether the initial connections (the ones for first target_cluster before
+  // whether the initial connections (the ones for first target_cluster before
   // the change) are expected to be dropped or expected to stay
   bool initial_connections_should_drop;
 };
@@ -364,10 +391,10 @@ TEST_F(ClusterSetTest, TargetClusterNoChange) {
 
   // check the new target_cluster was repoted only once
   const std::string needle = "New target cluster assigned in the metadata";
-  const std::string log_content = router.get_full_logfile();
+  const std::string log_content = router.get_logfile_content();
 
-  // 1 is expected, that comes from the inital reading of the metadata
-  EXPECT_EQ(1, count_str_occurences(log_content, needle)) << log_content;
+  // 1 is expected, that comes from the initial reading of the metadata
+  EXPECT_EQ(1, count_str_occurences(log_content, needle));
 }
 
 class ClusterChangeTargetClusterInTheMetadataTest
@@ -405,13 +432,15 @@ TEST_P(ClusterChangeTargetClusterInTheMetadataTest,
                                          ? "accepting RW connections"
                                          : "not accepting RW connections";
 
-    const std::string pattern =
-        "INFO .* Target cluster '" + target_cluster_name +
-        "' is part of a ClusterSet; role of a cluster within a ClusterSet "
-        "is '" +
-        cluster_role + "'; " + accepting_rw;
+    const std::string pattern1 =
+        "INFO .* Target cluster\\(s\\) are part of a ClusterSet: " +
+        accepting_rw;
+    const std::string pattern2 =
+        "INFO .* Cluster '" + target_cluster_name +
+        "': role of a cluster within a ClusterSet is '" + cluster_role + "';";
 
-    EXPECT_TRUE(wait_log_contains(router, pattern, 5s)) << pattern;
+    EXPECT_TRUE(wait_log_contains(router, pattern1, 5s)) << pattern1;
+    EXPECT_TRUE(wait_log_contains(router, pattern2, 5s)) << pattern2;
   }
 
   SCOPED_TRACE(
@@ -465,25 +494,30 @@ TEST_P(ClusterChangeTargetClusterInTheMetadataTest,
     const std::string accepting_rw = changed_target_cluster_id == 0
                                          ? "accepting RW connections"
                                          : "not accepting RW connections";
-    const std::string pattern =
+    const std::string pattern1 =
         "INFO .* New target cluster assigned in the metadata: '" +
         changed_target_cluster_name + "'";
 
     const std::string pattern2 =
-        "INFO .* Target cluster '" + changed_target_cluster_name +
-        "' is part of a ClusterSet; role of a cluster within a ClusterSet "
-        "is '" +
-        cluster_role + "'; " + accepting_rw;
-
+        "INFO .* Target cluster\\(s\\) are part of a ClusterSet: " +
+        accepting_rw;
     const std::string pattern3 =
+        "INFO .* Cluster '" + changed_target_cluster_name +
+        "': role of a cluster within a ClusterSet is '" + cluster_role + "';";
+
+    EXPECT_TRUE(wait_log_contains(router, pattern1, 5s)) << pattern1;
+    EXPECT_TRUE(wait_log_contains(router, pattern2, 5s)) << pattern2;
+
+    const std::string pattern4 =
         "INFO .* New router options read from the metadata "
         "'\\{\"target_cluster\" : \"" +
         changed_target_cluster + "\" \\}', was '\\{\"target_cluster\" : \"" +
         initial_target_cluster + "\" \\}'";
 
-    EXPECT_TRUE(wait_log_contains(router, pattern, 5s)) << pattern;
+    EXPECT_TRUE(wait_log_contains(router, pattern1, 5s)) << pattern1;
     EXPECT_TRUE(wait_log_contains(router, pattern2, 100ms)) << pattern2;
     EXPECT_TRUE(wait_log_contains(router, pattern3, 100ms)) << pattern3;
+    EXPECT_TRUE(wait_log_contains(router, pattern4, 100ms)) << pattern4;
   }
 
   if (GetParam().initial_connections_should_drop) {
@@ -699,8 +733,10 @@ TEST_P(UnknownClusterSetTargetClusterTest, UnknownClusterSetTargetCluster) {
   SCOPED_TRACE("// Prepare the dynamic state file for the Router");
   auto &router = launch_router(EXIT_SUCCESS, -1s);
 
-  EXPECT_TRUE(wait_log_contains(router, GetParam().expected_error, 2s))
-      << router.get_full_logfile();
+  EXPECT_TRUE(wait_log_contains(router, GetParam().expected_error, 20s));
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(
+      clusterset_data_.clusters[1].nodes[0].http_port, 2));
 
   SCOPED_TRACE(
       "// Make the connections to both RW and RO ports, both should fail");
@@ -737,10 +773,7 @@ INSTANTIATE_TEST_SUITE_P(
             "00000000-0000-0000-0000-0000000000G1", 0, 0,
             "ERROR.* Could not find target_cluster "
             "'00000000-0000-0000-0000-0000000000G1' in the metadata"},
-        // [@TS_R9_1/7]
-        TargetClusterTestParams{"", 0, 0,
-                                "Target cluster for router_id=1 not set, using "
-                                "'primary' as a target cluster"},
+
         // [@TS_R9_1/8]
         TargetClusterTestParams{"0", 0, 0,
                                 "ERROR.* Could not find target_cluster "
@@ -752,13 +785,46 @@ INSTANTIATE_TEST_SUITE_P(
             "''00000000-0000-0000-0000-0000000000g1'' in the metadata"}));
 
 /**
+ * @test Checks that if the `target_cluster` for the Router is empty in the
+ * metadata the warning is logged and the Router accepts the connections
+ * using primary cluster as a default.
+ * [@TS_R9_1/7]
+ */
+TEST_F(ClusterSetTest, TargetClusterEmptyInMetadata) {
+  create_clusterset(view_id, /*target_cluster_id*/ 0, /*primary_cluster_id*/ 0,
+                    "metadata_clusterset.js",
+                    /*router_options*/ R"({"target_cluster" : "" })");
+
+  SCOPED_TRACE("// Prepare the dynamic state file for the Router");
+  auto &router = launch_router(EXIT_SUCCESS, -1s);
+
+  EXPECT_TRUE(wait_log_contains(router,
+                                "Target cluster for router_id=1 not set, using "
+                                "'primary' as a target cluster",
+                                20s));
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(
+      clusterset_data_.clusters[1].nodes[0].http_port, 2));
+
+  SCOPED_TRACE(
+      "// Make the connections to both RW and RO ports, both should be ok");
+  make_new_connection_ok(
+      router_port_rw,
+      clusterset_data_.clusters[0].nodes[kRWNodeId].classic_port);
+  make_new_connection_ok(
+      router_port_ro,
+      clusterset_data_.clusters[0].nodes[kRONodeId].classic_port);
+}
+
+/**
  * @test Check that the Router correctly follows primary Cluster when it is its
  * target_cluster.
  */
 TEST_F(ClusterSetTest, ClusterRolesChangeInTheRuntime) {
   // first cluster is a primary on start
   unsigned primary_cluster_id = 0;
-  const std::string router_options = R"({"target_cluster" : "primary"})";
+  const std::string router_options =
+      R"({"target_cluster" : "primary", "stats_updates_frequency": 1})";
 
   create_clusterset(view_id, /*target_cluster_id*/ primary_cluster_id,
                     /*primary_cluster_id*/ primary_cluster_id,
@@ -905,7 +971,8 @@ TEST_F(ClusterSetTest, TargetClusterStickToPrimaryUUID) {
   unsigned primary_cluster_id = 0;
   const unsigned target_cluster_id = 0;
   const std::string router_options =
-      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g1"})";
+      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g1",
+         "stats_updates_frequency": 1})";
 
   create_clusterset(view_id, /*target_cluster_id*/ target_cluster_id,
                     /*primary_cluster_id*/ primary_cluster_id,
@@ -1265,13 +1332,14 @@ TEST_P(ViewIdChangesTest, ViewIdChanges) {
                    clusterset_data_.get_all_nodes_classic_ports(), view_id + 2);
 
   SCOPED_TRACE(
-      "// Let's propagete the last change to all nodes in the ClusterSet");
+      "// Let's propagate the last change to all nodes in the ClusterSet");
 
   for (const auto &cluster : clusterset_data_.clusters) {
     for (const auto &node : cluster.nodes) {
       const auto http_port = node.http_port;
-      set_mock_metadata(view_id + 2, /*this_cluster_id*/ 2, target_cluster_id,
-                        http_port, clusterset_data_, router_options);
+      set_mock_metadata(view_id + 2, /*this_cluster_id*/ cluster.id,
+                        target_cluster_id, http_port, clusterset_data_,
+                        router_options);
     }
   }
 
@@ -1379,12 +1447,10 @@ TEST_F(ClusterSetTest, TwoPrimaryClustersHighierViewId) {
   for (unsigned node_id = 0;
        node_id < clusterset_data_.clusters[kPrimaryClusterId].nodes.size();
        ++node_id) {
-    set_mock_metadata(view_id + 2, /*this_cluster_id*/ kPrimaryClusterId,
-                      kPrimaryClusterId,
-                      clusterset_data_.clusters[kFirstReplicaClusterId]
-                          .nodes[node_id]
-                          .http_port,
-                      clusterset_data_, router_options);
+    set_mock_metadata(
+        view_id + 2, /*this_cluster_id*/ kPrimaryClusterId, kPrimaryClusterId,
+        clusterset_data_.clusters[kPrimaryClusterId].nodes[node_id].http_port,
+        clusterset_data_, router_options);
   }
 
   EXPECT_TRUE(wait_for_transaction_count_increase(
@@ -1612,7 +1678,8 @@ TEST_P(ReplicaTargetClusterMarkedInvalidInTheMetadataTest,
       view_id, /*target_cluster_id*/ kFirstReplicaClusterId,
       /*primary_cluster_id*/ kPrimaryClusterId, "metadata_clusterset.js",
       /*router_options*/
-      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2"})");
+      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2",
+          "stats_updates_frequency": 1})");
   /* auto &router = */ launch_router();
 
   EXPECT_TRUE(wait_for_transaction_count_increase(
@@ -1641,7 +1708,9 @@ TEST_P(ReplicaTargetClusterMarkedInvalidInTheMetadataTest,
         /*target_cluster_id*/ kFirstReplicaClusterId, http_port,
         clusterset_data_,
         /*router_options*/
-        R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2", "invalidated_cluster_policy" : ")" +
+        R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2",
+          "stats_updates_frequency": 1,
+          "invalidated_cluster_policy" : ")" +
             policy + "\" }");
   }
 
@@ -1959,6 +2028,523 @@ TEST_F(ClusterSetTest, SomeMetadataServerUnaccessible) {
                          clusterset_data_.clusters[kPrimaryClusterId]
                              .nodes[kRONodeId + 1]
                              .classic_port);
+}
+
+struct StatsUpdatesFrequencyNoUpdatesParam {
+  std::string router_options_json;
+  bool expect_parsing_error;
+};
+
+class StatsUpdatesFrequencyTest : public ClusterSetTest {};
+
+class StatsUpdatesFrequencyNoUpdatesTest
+    : public StatsUpdatesFrequencyTest,
+      public ::testing::WithParamInterface<
+          StatsUpdatesFrequencyNoUpdatesParam> {};
+
+/**
+ * @test Verifies that router_cs_options stats_updates_frequency field is
+ * honoured as expected
+ */
+TEST_P(StatsUpdatesFrequencyNoUpdatesTest, StatsUpdatesFrequencyNoUpdates) {
+  create_clusterset(view_id, /*target_cluster_id*/ 0,
+                    /*primary_cluster_id*/ 0, "metadata_clusterset.js",
+                    GetParam().router_options_json);
+
+  SCOPED_TRACE("// Launch the Router");
+  auto &router = launch_router();
+
+  const auto primary_node_http_port =
+      clusterset_data_.clusters[0].nodes[0].http_port;
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(primary_node_http_port, 20));
+
+  const auto last_check_in_count = get_int_global_value(
+      primary_node_http_port, "update_last_check_in_count");
+
+  // no last_check_in updates expected
+  EXPECT_EQ(0, last_check_in_count);
+
+  const std::string log_content = router.get_logfile_content();
+  const std::string error =
+      "Error parsing stats_updates_frequency from the router.options";
+  if (GetParam().expect_parsing_error) {
+    EXPECT_TRUE(pattern_found(log_content, error));
+  } else {
+    EXPECT_FALSE(pattern_found(log_content, error));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    StatsUpdatesFrequency, StatsUpdatesFrequencyNoUpdatesTest,
+    ::testing::Values(
+        // 0) explicit 0
+        StatsUpdatesFrequencyNoUpdatesParam{
+            /*router_options_json*/ R"({"stats_updates_frequency" : 0})",
+            /*expect_parsing_error*/ false},
+        // 1) field not present
+        StatsUpdatesFrequencyNoUpdatesParam{/*router_options_json*/ R"({})",
+                                            /*expect_parsing_error*/ false},
+        // 2) empty value
+        StatsUpdatesFrequencyNoUpdatesParam{
+            /*router_options_json*/ R"({"stats_updates_frequency" : ""})",
+            /*expect_parsing_error*/ true},
+        // 3) not a number
+        StatsUpdatesFrequencyNoUpdatesParam{
+            /*router_options_json*/ R"({"stats_updates_frequency" : "aaa"})",
+            /*expect_parsing_error*/ true},
+        // 4) negative number
+        StatsUpdatesFrequencyNoUpdatesParam{
+            /*router_options_json*/ R"({"stats_updates_frequency" : -1})",
+            /*expect_parsing_error*/ true}));
+
+/**
+ * @test The ttl = 50ms, stats_updates_frequency=1s, the stats updates
+         should happen ~1s
+ */
+TEST_F(StatsUpdatesFrequencyTest, StatsUpdatesFrequency1s) {
+  create_clusterset(view_id, /*target_cluster_id*/ 0,
+                    /*primary_cluster_id*/ 0, "metadata_clusterset.js",
+                    R"({"stats_updates_frequency" : 1})");
+
+  SCOPED_TRACE("// Launch the Router");
+  /*auto &router =*/launch_router();
+
+  const auto primary_node_http_port =
+      clusterset_data_.clusters[0].nodes[0].http_port;
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(primary_node_http_port, 20));
+
+  const auto last_check_in_count = get_int_global_value(
+      primary_node_http_port, "update_last_check_in_count");
+
+  EXPECT_GE(last_check_in_count, 1);
+}
+
+/**
+ * @test ttl is high, stats_updates_frequency=1s, the stats updates
+        will happen in the same rate metadata refresh will (ttl)
+ */
+TEST_F(StatsUpdatesFrequencyTest, StatsUpdatesFrequencyHighTTL) {
+  create_clusterset(view_id, /*target_cluster_id*/ 0,
+                    /*primary_cluster_id*/ 0, "metadata_clusterset.js",
+                    R"({"stats_updates_frequency" : 1})");
+
+  SCOPED_TRACE("// Launch the Router");
+  /*auto &router =*/launch_router(EXIT_SUCCESS, kReadyNotifyTimeout, 30s);
+
+  const auto primary_node_http_port =
+      clusterset_data_.clusters[0].nodes[0].http_port;
+
+  // wait 2 seconds and see that there was no stats update as the TTL is high
+  // and the next update will be done along with the next metadata refresh
+  std::this_thread::sleep_for(1500ms);
+
+  const auto last_check_in_count = get_int_global_value(
+      primary_node_http_port, "update_last_check_in_count");
+
+  EXPECT_GE(last_check_in_count, 0);
+}
+
+/**
+ * @test Checks that "use_replica_primary_as_rw" router options from the
+ * metadata is handled properly when the target cluster is Replica
+ */
+TEST_F(ClusterSetTest, UseReplicaPrimaryAsRwNode) {
+  const int primary_cluster_id = 0;
+  const int target_cluster_id = 1;
+
+  std::string router_cs_options =
+      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2",
+          "use_replica_primary_as_rw": false})";
+  create_clusterset(view_id, target_cluster_id, primary_cluster_id,
+                    "metadata_clusterset.js", router_cs_options);
+
+  const auto primary_node_http_port =
+      clusterset_data_.clusters[0].nodes[0].http_port;
+
+  SCOPED_TRACE("// Launch the Router");
+  /*auto &router =*/launch_router();
+
+  SCOPED_TRACE(
+      "// Make the connections to both RW and RO ports and check if they are "
+      "directed to expected nodes of the Replica Cluster");
+
+  // 'use_replica_primary_as_rw' is false and our target cluster is Replica so
+  // no RW connections should be possible
+  verify_new_connection_fails(router_port_rw);
+
+  // the Replica's primary should be used in rotation as a destination of the RO
+  // connections
+  for (size_t i = 0;
+       i < clusterset_data_.clusters[target_cluster_id].nodes.size(); ++i) {
+    make_new_connection_ok(
+        router_port_ro,
+        clusterset_data_.clusters[target_cluster_id].nodes[i].classic_port);
+  }
+
+  // ==================================================================
+  // now we set 'use_replica_primary_as_rw' to 'true' in the metadata
+  router_cs_options =
+      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2",
+          "use_replica_primary_as_rw": true})";
+
+  set_mock_metadata(view_id, target_cluster_id, target_cluster_id,
+                    primary_node_http_port, clusterset_data_,
+                    router_cs_options);
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(primary_node_http_port, 2));
+
+  std::vector<std::unique_ptr<MySQLSession>> rw_connections;
+  std::vector<std::unique_ptr<MySQLSession>> ro_connections;
+  // Now the RW connection should be ok and directed to the Replicas Primary
+  for (size_t i = 0; i < 2; ++i) {
+    auto res = make_new_connection_ok(
+        router_port_rw,
+        clusterset_data_.clusters[target_cluster_id].nodes[0].classic_port);
+
+    rw_connections.push_back(std::move(res));
+  }
+
+  // The Replicas Primary should not be used as a destination for RO connections
+  // now
+  for (size_t i = 0; i < 4; ++i) {
+    auto res = make_new_connection_ok(
+        router_port_ro, clusterset_data_.clusters[target_cluster_id]
+                            .nodes[i % 2 + 1]
+                            .classic_port);
+
+    ro_connections.push_back(std::move(res));
+  }
+
+  // ==================================================================
+  // set 'use_replica_primary_as_rw' to 'false'
+  router_cs_options =
+      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2",
+          "use_replica_primary_as_rw": false})";
+
+  set_mock_metadata(view_id, target_cluster_id, target_cluster_id,
+                    primary_node_http_port, clusterset_data_,
+                    router_cs_options);
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(primary_node_http_port, 2));
+
+  // check that the RW connections were dropped
+  for (auto &con : rw_connections) {
+    EXPECT_TRUE(wait_connection_dropped(*con));
+  }
+
+  // check that the RO connections are fine
+  for (auto &con : ro_connections) {
+    verify_existing_connection_ok(con.get());
+  }
+
+  // connections to the RW port should not be possible again
+  verify_new_connection_fails(router_port_rw);
+
+  // the Replica's primary should be used in rotation as a destination of the RO
+  // connections
+  const auto target_cluster_nodes =
+      clusterset_data_.clusters[target_cluster_id].nodes.size();
+  for (size_t i = 0; i < target_cluster_nodes; ++i) {
+    make_new_connection_ok(router_port_ro,
+                           clusterset_data_.clusters[target_cluster_id]
+                               .nodes[i % target_cluster_nodes]
+                               .classic_port);
+  }
+}
+
+/**
+ * @test Checks that "use_replica_primary_as_rw" router option from the
+ * metadata is ignored when the target cluster is Primary
+ */
+TEST_F(ClusterSetTest, UseReplicaPrimaryAsRwNodeIgnoredIfTargetPrimary) {
+  const int primary_cluster_id = 0;
+  const int target_cluster_id = 0;  // our target is primary cluster
+
+  std::string router_cs_options =
+      R"({"target_cluster" : "primary",
+          "use_replica_primary_as_rw": false})";
+  create_clusterset(view_id, target_cluster_id, primary_cluster_id,
+                    "metadata_clusterset.js", router_cs_options);
+
+  SCOPED_TRACE("// Launch the Router");
+  /*auto &router =*/launch_router();
+
+  // 'use_replica_primary_as_rw' is 'false' but our target cluster is Primary so
+  //  RW connections should be possible
+  make_new_connection_ok(
+      router_port_rw,
+      clusterset_data_.clusters[target_cluster_id].nodes[0].classic_port);
+
+  // the RO connections should be routed to the Secondary nodes of the Primary
+  // Cluster
+  for (size_t i = 0;
+       i < clusterset_data_.clusters[target_cluster_id].nodes.size(); ++i) {
+    make_new_connection_ok(router_port_ro,
+                           clusterset_data_.clusters[target_cluster_id]
+                               .nodes[1 + i % 2]
+                               .classic_port);
+  }
+
+  // ==================================================================
+  // set 'use_replica_primary_as_rw' to 'true'
+  router_cs_options =
+      R"({"target_cluster" : "primary",
+          "use_replica_primary_as_rw": true})";
+
+  const auto primary_node_http_port =
+      clusterset_data_.clusters[0].nodes[0].http_port;
+  set_mock_metadata(view_id, target_cluster_id, target_cluster_id,
+                    primary_node_http_port, clusterset_data_,
+                    router_cs_options);
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(primary_node_http_port, 2));
+
+  // check that the behavior did not change
+
+  make_new_connection_ok(
+      router_port_rw,
+      clusterset_data_.clusters[target_cluster_id].nodes[0].classic_port);
+
+  // the RO connections should be routed to the Secondary nodes of the Primary
+  // Cluster
+  for (size_t i = 0;
+       i < clusterset_data_.clusters[target_cluster_id].nodes.size(); ++i) {
+    make_new_connection_ok(router_port_ro,
+                           clusterset_data_.clusters[target_cluster_id]
+                               .nodes[1 + (i + 1) % 2]
+                               .classic_port);
+  }
+}
+
+class ClusterSetUseReplicaPrimaryAsRwNodeInvalidTest
+    : public ClusterSetTest,
+      public ::testing::WithParamInterface<std::string> {};
+
+/**
+ * @test Checks that invalid values of "use_replica_primary_as_rw" in the
+ * metadata are handled properly (default = false used) when the target
+ * cluster is Replica
+ */
+TEST_P(ClusterSetUseReplicaPrimaryAsRwNodeInvalidTest,
+       UseReplicaPrimaryAsRwNodeInvalid) {
+  const int primary_cluster_id = 0;
+  const int target_cluster_id = 1;
+
+  std::string inv = "\"\"";
+  std::string router_cs_options =
+      R"({"target_cluster" : "00000000-0000-0000-0000-0000000000g2",
+          "use_replica_primary_as_rw": )" +
+      GetParam() + "}";
+  create_clusterset(view_id, target_cluster_id, primary_cluster_id,
+                    "metadata_clusterset.js", router_cs_options);
+
+  SCOPED_TRACE("// Launch the Router");
+  auto &router = launch_router();
+
+  SCOPED_TRACE(
+      "// Make the connections to both RW and RO ports and check if they are "
+      "directed to expected nodes of the Replica Cluster");
+
+  // 'use_replica_primary_as_rw' is false and our target cluster is Replica so
+  // no RW connections should be possible
+  verify_new_connection_fails(router_port_rw);
+
+  // the Replica's primary should be used in rotation as a destination of the RO
+  // connections
+  for (size_t i = 0;
+       i < clusterset_data_.clusters[target_cluster_id].nodes.size(); ++i) {
+    make_new_connection_ok(
+        router_port_ro,
+        clusterset_data_.clusters[target_cluster_id].nodes[i].classic_port);
+  }
+
+  const std::string warning =
+      "WARNING .* Error parsing use_replica_primary_as_rw from the "
+      "router.options: options.use_replica_primary_as_rw='" +
+      GetParam() + "'; not a boolean. Using default value 'false'";
+
+  EXPECT_TRUE(wait_log_contains(router, warning, 1s)) << warning;
+}
+
+INSTANTIATE_TEST_SUITE_P(UseReplicaPrimaryAsRwNodeInvalid,
+                         ClusterSetUseReplicaPrimaryAsRwNodeInvalidTest,
+                         ::testing::Values("\"\"", "0", "1", "\"foo\"",
+                                           "\"false\""));
+/**
+ * @test Checks that switching between fetch_whole_topology on and off works as
+ * expected when it comes to routing new connections and keeping/closing
+ * existing ones
+ */
+TEST_F(ClusterSetTest, FetchWholeTopologyConnections) {
+  const std::string target_cluster = "00000000-0000-0000-0000-0000000000g2";
+  const auto target_cluster_id = 1;
+
+  create_clusterset(
+      view_id, target_cluster_id, /*primary_cluster_id*/ 0,
+      "metadata_clusterset.js",
+      /*router_options*/ R"({"target_cluster" : ")" + target_cluster + "\" }");
+
+  SCOPED_TRACE("// Launch the Router");
+  /*auto &router = */ launch_router();
+
+  // since our target cluster is replica we should not be able to make RW
+  // connection
+  verify_new_connection_fails(router_port_rw);
+
+  // RO connections should be routed to the first replica
+  std::vector<std::unique_ptr<MySQLSession>> ro_cons_to_target_cluster;
+  for (const auto &node :
+       clusterset_data_.clusters[kFirstReplicaClusterId].nodes) {
+    ro_cons_to_target_cluster.emplace_back(
+        make_new_connection_ok(router_port_ro, node.classic_port));
+  }
+
+  EXPECT_EQ(3, ro_cons_to_target_cluster.size());
+
+  // switch the mode to fetch_whole_topology
+  set_fetch_whole_topology(true);
+  EXPECT_TRUE(wait_for_transaction_count_increase(
+      clusterset_data_.clusters[0].nodes[0].http_port, 3));
+
+  // since now the nodes pool is the superset of the previous pool the existing
+  // RO connections should still be alive
+  for (const auto &con : ro_cons_to_target_cluster) {
+    verify_existing_connection_ok(con.get());
+  }
+
+  // there is RW node now in the available nodes pool (from Primary Cluster) so
+  // the RW connection should be possible now
+  const auto rw_con = make_new_connection_ok(
+      router_port_rw,
+      clusterset_data_.clusters[kPrimaryClusterId].nodes[0].classic_port);
+
+  // Let's make a bunch of new RO connections, they should go to the RO nodes of
+  // all the Clusters of the ClusterSet since we are in the fetch_whole_topology
+  // mode now
+  std::vector<std::unique_ptr<MySQLSession>> ro_cons_to_primary;
+  for (size_t i = 1;
+       i < clusterset_data_.clusters[kPrimaryClusterId].nodes.size(); ++i) {
+    ro_cons_to_primary.emplace_back(make_new_connection_ok(
+        router_port_ro,
+        clusterset_data_.clusters[kPrimaryClusterId].nodes[i].classic_port));
+  }
+  EXPECT_EQ(2, ro_cons_to_primary.size());
+
+  std::vector<std::unique_ptr<MySQLSession>> ro_cons_to_first_replica;
+  for (size_t i = 1;
+       i < clusterset_data_.clusters[kFirstReplicaClusterId].nodes.size();
+       ++i) {
+    ro_cons_to_first_replica.emplace_back(make_new_connection_ok(
+        router_port_ro, clusterset_data_.clusters[kFirstReplicaClusterId]
+                            .nodes[i]
+                            .classic_port));
+  }
+  EXPECT_EQ(2, ro_cons_to_first_replica.size());
+
+  std::vector<std::unique_ptr<MySQLSession>> ro_cons_to_second_replica;
+  for (size_t i = 1;
+       i < clusterset_data_.clusters[kSecondReplicaClusterId].nodes.size();
+       ++i) {
+    ro_cons_to_second_replica.emplace_back(make_new_connection_ok(
+        router_port_ro, clusterset_data_.clusters[kSecondReplicaClusterId]
+                            .nodes[i]
+                            .classic_port));
+  }
+  EXPECT_EQ(2, ro_cons_to_second_replica.size());
+
+  // switch off the mode fetch_whole_topology
+  set_fetch_whole_topology(false);
+  EXPECT_TRUE(wait_for_transaction_count_increase(
+      clusterset_data_.clusters[0].nodes[0].http_port, 3));
+
+  // we are back in the "use only the target cluster" mode
+  // the RW connection should be shut down
+  verify_existing_connection_dropped(rw_con.get());
+
+  // the RO connections to the Clusters other than our target_cluster should be
+  // dropped too
+  for (const auto &con : ro_cons_to_primary) {
+    verify_existing_connection_dropped(con.get());
+  }
+  for (const auto &con : ro_cons_to_second_replica) {
+    verify_existing_connection_dropped(con.get());
+  }
+
+  // the RO connections to our target_cluster should still be fine tho
+  for (const auto &con : ro_cons_to_target_cluster) {
+    verify_existing_connection_ok(con.get());
+  }
+  for (const auto &con : ro_cons_to_first_replica) {
+    verify_existing_connection_ok(con.get());
+  }
+
+  // again no new RW connection should be possible
+  verify_new_connection_fails(router_port_rw);
+  // new RO connections should be directed to our target_cluster
+  for (const auto &node :
+       clusterset_data_.clusters[kFirstReplicaClusterId].nodes) {
+    ro_cons_to_target_cluster.emplace_back(
+        make_new_connection_ok(router_port_ro, node.classic_port));
+  }
+}
+
+/**
+ * @test Checks that switching between fetch_whole_topology on and off works as
+ * expected when when GR notifications are in use
+ */
+TEST_F(ClusterSetTest, UseMultipleClustersGrNotifications) {
+  const std::string target_cluster = "00000000-0000-0000-0000-0000000000g2";
+  const auto target_cluster_id = 1;
+
+  create_clusterset(
+      view_id, target_cluster_id, /*primary_cluster_id*/ 0,
+      "metadata_clusterset.js",
+      /*router_options*/ R"({"target_cluster" : ")" + target_cluster + "\" }",
+      ".*", false, true);
+
+  SCOPED_TRACE("// Launch the Router");
+  auto &router = launch_router(EXIT_SUCCESS, 10s, kTTL, true);
+
+  EXPECT_TRUE(wait_for_transaction_count_increase(
+      clusterset_data_.clusters[0].nodes[0].http_port, 2));
+
+  // we do not use multiple clusters yet, let's check that we opened GR
+  // notification connections only to our target_cluster
+  std::string log_content = router.get_logfile_content();
+  for (auto &cluster : clusterset_data_.clusters) {
+    for (auto &node : cluster.nodes) {
+      const std::string log_entry =
+          "Enabling GR notices for cluster '" + cluster.name +
+          "' changes on node 127.0.0.1:" + std::to_string(node.x_port);
+
+      const size_t expected_log_occurences =
+          cluster.gr_uuid == target_cluster ? 1 : 0;
+      EXPECT_EQ(expected_log_occurences,
+                count_str_occurences(log_content, log_entry));
+    }
+  }
+
+  // switch to use multiple clusters now
+  set_fetch_whole_topology(true);
+  EXPECT_TRUE(wait_for_transaction_count_increase(
+      clusterset_data_.clusters[0].nodes[0].http_port, 2));
+
+  // now we expect the GR notification listener to be opened once on each
+  // ClusterSet node
+  log_content = router.get_logfile_content();
+  for (auto &cluster : clusterset_data_.clusters) {
+    for (auto &node : cluster.nodes) {
+      const std::string log_entry =
+          "Enabling GR notices for cluster '" + cluster.name +
+          "' changes on node 127.0.0.1:" + std::to_string(node.x_port);
+
+      const size_t expected_log_occurences = 1;
+      EXPECT_EQ(expected_log_occurences,
+                count_str_occurences(log_content, log_entry));
+    }
+  }
 }
 
 int main(int argc, char *argv[]) {

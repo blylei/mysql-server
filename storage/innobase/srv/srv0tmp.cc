@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -63,7 +63,7 @@ Tablespace_pool *tbsp_pool = nullptr;
 /* Directory to store session temporary tablespaces, provided by user */
 char *srv_temp_dir = nullptr;
 
-/** Sesssion Temporary tablespace */
+/** Session Temporary tablespace */
 Tablespace::Tablespace()
     : m_space_id(++m_last_used_space_id), m_inited(), m_thread_id() {
   ut_ad(m_space_id <= dict_sys_t::s_max_temp_space_id);
@@ -86,7 +86,7 @@ Tablespace::~Tablespace() {
     ib::error(ER_IB_FAILED_TO_DELETE_TABLESPACE_FILE)
         << "Failed to delete file " << path();
     os_file_get_last_error(true);
-    ut_ad(0);
+    ut_d(ut_error);
   }
 }
 
@@ -115,8 +115,7 @@ dberr_t Tablespace::create() {
 
   mtr_set_log_mode(&mtr, MTR_LOG_NO_REDO);
 
-  bool ret =
-      fsp_header_init(m_space_id, FIL_IBT_FILE_INITIAL_SIZE, &mtr, false);
+  bool ret = fsp_header_init(m_space_id, FIL_IBT_FILE_INITIAL_SIZE, &mtr);
   mtr_commit(&mtr);
 
   if (!ret) {
@@ -147,7 +146,7 @@ bool Tablespace::truncate() {
 
   mtr_start(&mtr);
   mtr_set_log_mode(&mtr, MTR_LOG_NO_REDO);
-  fsp_header_init(m_space_id, FIL_IBT_FILE_INITIAL_SIZE, &mtr, false);
+  fsp_header_init(m_space_id, FIL_IBT_FILE_INITIAL_SIZE, &mtr);
   mtr_commit(&mtr);
 
   return true;
@@ -238,7 +237,7 @@ void Tablespace_pool::free_ts(Tablespace *ts) {
   if (it != m_active->end()) {
     m_active->erase(it);
   } else {
-    ut_ad(0);
+    ut_d(ut_error);
   }
 
   m_free->push_back(ts);

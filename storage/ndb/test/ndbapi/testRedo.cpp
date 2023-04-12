@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2012, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2012, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
+#include "util/require.h"
 #include <cstdint>
 #include <time.h>
 
@@ -1933,7 +1934,7 @@ runCheckLCPStartsAfterNR(NDBT_Context* ctx, NDBT_Step* step)
  * simulate a tardy disk, wth of error insertion (5090).
  * Empty the redo log, execute some more transactions.
  *
- * The test fills some redo log part upto almost full (error 410).
+ * The test fills some redo log part up to almost full (error 410).
  * The error insertion is on the first redo log with fileNo>3 and the default
  * NoOfFragmentLogFiles=16. So the test assumes with confidence that
  * the error insertion must have occurred and the victim redo log file

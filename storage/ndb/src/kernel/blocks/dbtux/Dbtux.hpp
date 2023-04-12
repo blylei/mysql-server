@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -375,7 +375,7 @@ private:
       Found = 3,                // return current as next scan result
       Blocked = 4,              // found and waiting for ACC lock
       Locked = 5,               // found and locked or no lock needed
-      Next = 6,                 // looking for next extry
+      Next = 6,                 // looking for next entry
       Last = 7,                 // after last entry
       Aborting = 8
     };
@@ -830,9 +830,6 @@ private:
                            Dbtux *tux_block);
   void prepare_move_scan_ctx(ScanOpPtr scanPtr, Dbtux *tux_block);
 
-  /*
-   * DbtuxCmp.cpp
-   */
   int cmpSearchKey(TuxCtx&, const KeyDataC& searchKey, const KeyDataC& entryKey, Uint32 cnt);
   int cmpSearchBound(TuxCtx&, const KeyBoundC& searchBound, const KeyDataC& entryKey, Uint32 cnt);
 
@@ -1711,8 +1708,6 @@ Dbtux::max(unsigned x, unsigned y)
 {
   return x > y ? x : y;
 }
-
-// DbtuxCmp.cpp
 
 /**
  * Can be called from MT-build of ordered indexes,

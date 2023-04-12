@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2014, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,8 +26,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "sql-common/json_dom.h"
 #include "sql/field.h"
-#include "sql/json_dom.h"
 #include "sql/table.h"
 
 /**
@@ -65,10 +65,10 @@ class Base_mock_field_varstring : public Field_varstring {
 
 class Base_mock_field_blob : public Field_blob {
  public:
-  Base_mock_field_blob(uint32 length)
+  Base_mock_field_blob(const char *field_name_arg, uint32 length)
       : Field_blob(length,              // len_arg
                    false,               // maybe_null_arg
-                   "field_NAME",        // field_name_arg
+                   field_name_arg,      // field_name_arg
                    &my_charset_latin1,  // char set
                    true) {}             // set_packlength
 };

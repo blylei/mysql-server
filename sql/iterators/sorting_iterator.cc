@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2018, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -404,7 +404,7 @@ SortingIterator::SortingIterator(THD *thd, Filesort *filesort,
                                  ha_rows *examined_rows)
     : RowIterator(thd),
       m_filesort(filesort),
-      m_source_iterator(move(source)),
+      m_source_iterator(std::move(source)),
       m_num_rows_estimate(num_rows_estimate),
       m_tables_to_get_rowid_for(tables_to_get_rowid_for),
       m_examined_rows(examined_rows) {}

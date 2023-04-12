@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2021, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -60,6 +60,8 @@ struct BuildIndxReq {
   Uint32 parallelism;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_BUILDINDXREQ, Local);
+
 struct BuildIndxConf {
   static constexpr Uint32 SignalLength = 6;
 
@@ -70,6 +72,8 @@ struct BuildIndxConf {
   Uint32 indexId;
   Uint32 indexType;
 };
+
+DECLARE_SIGNAL_SCOPE(GSN_BUILDINDXCONF, Local);
 
 struct BuildIndxRef {
   enum ErrorCode {
@@ -101,6 +105,7 @@ struct BuildIndxRef {
   Uint32 masterNodeId;
 };
 
+DECLARE_SIGNAL_SCOPE(GSN_BUILDINDXREF, Local);
 
 #undef JAM_FILE_ID
 

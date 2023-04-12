@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2021, Oracle and/or its affiliates.
+/* Copyright (c) 2011, 2022, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,8 +30,8 @@
 #include "my_inttypes.h"
 #include "my_sys.h"
 #include "my_systime.h"
+#include "mysql/components/services/bits/psi_stage_bits.h"
 #include "mysql/components/services/log_builtins.h"  //LogErr
-#include "mysql/components/services/psi_stage_bits.h"
 #include "mysql/psi/mysql_mutex.h"
 #include "mysqld_error.h"
 #include "prealloced_array.h"
@@ -48,7 +48,7 @@
 #include "sql/system_variables.h"
 #include "sql/thr_malloc.h"
 
-struct TABLE_LIST;
+class Table_ref;
 
 PSI_memory_key key_memory_Gtid_state_group_commit_sidno;
 
@@ -757,7 +757,7 @@ int Gtid_state::compress(THD *thd) {
   return gtid_table_persistor->compress(thd);
 }
 
-int Gtid_state::warn_or_err_on_modify_gtid_table(THD *thd, TABLE_LIST *table) {
+int Gtid_state::warn_or_err_on_modify_gtid_table(THD *thd, Table_ref *table) {
   DBUG_TRACE;
   int ret =
       gtid_table_persistor->warn_or_err_on_explicit_modification(thd, table);
@@ -877,6 +877,7 @@ void Gtid_state::update_gtids_impl_own_gtid(THD *thd, bool is_commit) {
       SQL thread or slave worker thread adds transaction owned GTID
       into global executed_gtids, lost_gtids and gtids_only_in_table.
     */
+    CONDITIONAL_SYNC_POINT_FOR_TIMESTAMP("before_gtid_externalization");
     executed_gtids._add_gtid(thd->owned_gtid);
     thd->rpl_thd_ctx.session_gtids_ctx().notify_after_gtid_executed_update(thd);
     if (thd->slave_thread && opt_bin_log && !opt_log_replica_updates) {

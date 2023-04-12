@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2019, 2021, Oracle and/or its affiliates.
+  Copyright (c) 2019, 2022, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -26,10 +26,12 @@
 #define MYSQL_ROUTER_CLASSIC_PROTOCOL_MESSAGE_H_
 
 #include <cstddef>  // uint8_t
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "mysql/harness/stdx/expected.h"
+#include "mysql/harness/stdx/flags.h"
 #include "mysqlrouter/classic_protocol_constants.h"
 
 namespace classic_protocol {
@@ -372,7 +374,7 @@ inline bool operator==(const ColumnMeta &a, const ColumnMeta &b) {
  */
 class Row {
  public:
-  using value_type = stdx::expected<std::string, void>;
+  using value_type = std::optional<std::string>;
   using const_iterator = typename std::vector<value_type>::const_iterator;
 
   Row(std::vector<value_type> fields) : fields_{std::move(fields)} {}
@@ -554,10 +556,19 @@ class Greeting {
   }
 
   uint32_t max_packet_size() const noexcept { return max_packet_size_; }
+  void max_packet_size(uint32_t sz) noexcept { max_packet_size_ = sz; }
+
   uint8_t collation() const noexcept { return collation_; }
+  void collation(uint8_t coll) noexcept { collation_ = coll; }
+
   std::string username() const { return username_; }
+  void username(const std::string &v) { username_ = v; }
+
   std::string auth_method_data() const { return auth_method_data_; }
+  void auth_method_data(const std::string &v) { auth_method_data_ = v; }
+
   std::string schema() const { return schema_; }
+  void schema(const std::string &schema) { schema_ = schema; }
 
   /**
    * name of the auth-method that was explicitly set.
@@ -567,6 +578,8 @@ class Greeting {
    * capabilities::plugin_auth wasn't set)
    */
   std::string auth_method_name() const { return auth_method_name_; }
+
+  void auth_method_name(const std::string &name) { auth_method_name_ = name; }
 
   // [key, value]* in Codec<wire::VarString> encoding
   std::string attributes() const { return attributes_; }
@@ -842,7 +855,7 @@ inline bool operator==(const StmtParamAppendData &a,
  */
 class StmtExecute {
  public:
-  using value_type = stdx::expected<std::string, void>;
+  using value_type = std::optional<std::string>;
 
   /**
    * construct a ExecuteStmt message.
@@ -961,16 +974,16 @@ constexpr bool operator==(const StmtFetch &a, const StmtFetch &b) {
 }
 
 /**
- * fetch rows from an executed statement.
+ * set options on the current connection.
  */
-class StmtSetOption {
+class SetOption {
  public:
   /**
-   * construct a ResetStmt message.
+   * construct a SetOption message.
    *
    * @param option options to set
    */
-  constexpr StmtSetOption(uint16_t option) : option_{option} {}
+  constexpr SetOption(uint16_t option) : option_{option} {}
 
   constexpr uint16_t option() const { return option_; }
 
@@ -978,7 +991,7 @@ class StmtSetOption {
   uint16_t option_;
 };
 
-constexpr bool operator==(const StmtSetOption &a, const StmtSetOption &b) {
+constexpr bool operator==(const SetOption &a, const SetOption &b) {
   return a.option() == b.option();
 }
 
@@ -1012,8 +1025,137 @@ inline bool operator==(const AuthMethodData &a, const AuthMethodData &b) {
   return a.auth_method_data() == b.auth_method_data();
 }
 
+// switch to Clone Protocol.
+//
+// response: server::Ok -> clone protocol
+// response: server::Error
+//
+// no content
+class Clone {};
 }  // namespace client
 }  // namespace message
 }  // namespace classic_protocol
+
+namespace classic_protocol::message::client::impl {
+class BinlogDump {
+ public:
+  // flags of message::client::BinlogDump
+  enum class Flags : uint16_t {
+    non_blocking = 1 << 0,
+  };
+};
+}  // namespace classic_protocol::message::client::impl
+
+namespace stdx {
+// enable flag-ops for BinlogDump::Flags
+template <>
+struct is_flags<classic_protocol::message::client::impl::BinlogDump::Flags>
+    : std::true_type {};
+}  // namespace stdx
+
+namespace classic_protocol::message::client {
+class BinlogDump {
+ public:
+  using Flags = typename impl::BinlogDump::Flags;
+
+  BinlogDump(stdx::flags<Flags> flags, uint32_t server_id, std::string filename,
+             uint32_t position)
+      : position_{position},
+        flags_{flags},
+        server_id_{server_id},
+        filename_{std::move(filename)} {}
+
+  [[nodiscard]] stdx::flags<Flags> flags() const { return flags_; }
+  [[nodiscard]] uint32_t server_id() const { return server_id_; }
+  [[nodiscard]] std::string filename() const { return filename_; }
+  [[nodiscard]] uint64_t position() const { return position_; }
+
+ private:
+  uint32_t position_;
+  stdx::flags<Flags> flags_;
+  uint32_t server_id_;
+  std::string filename_;
+};
+}  // namespace classic_protocol::message::client
+
+namespace classic_protocol::message::client::impl {
+class BinlogDumpGtid {
+ public:
+  // flags of message::client::BinlogDumpGtid
+  enum class Flags : uint16_t {
+    non_blocking = 1 << 0,
+    through_position = 1 << 1,
+    through_gtid = 1 << 2,
+  };
+};
+}  // namespace classic_protocol::message::client::impl
+
+namespace stdx {
+// enable flag-ops for BinlogDumpGtid::Flags
+template <>
+struct is_flags<classic_protocol::message::client::impl::BinlogDumpGtid::Flags>
+    : std::true_type {};
+}  // namespace stdx
+
+namespace classic_protocol::message::client {
+
+class BinlogDumpGtid {
+ public:
+  using Flags = typename impl::BinlogDumpGtid::Flags;
+
+  BinlogDumpGtid(stdx::flags<Flags> flags, uint32_t server_id,
+                 std::string filename, uint64_t position, std::string sids)
+      : flags_{flags},
+        server_id_{server_id},
+        filename_{std::move(filename)},
+        position_{position},
+        sids_{std::move(sids)} {}
+
+  [[nodiscard]] stdx::flags<Flags> flags() const { return flags_; }
+  [[nodiscard]] uint32_t server_id() const { return server_id_; }
+  [[nodiscard]] std::string filename() const { return filename_; }
+  [[nodiscard]] uint64_t position() const { return position_; }
+  [[nodiscard]] std::string sids() const { return sids_; }
+
+ private:
+  stdx::flags<Flags> flags_;
+  uint32_t server_id_;
+  std::string filename_;
+  uint64_t position_;
+  std::string sids_;
+};
+
+class RegisterReplica {
+ public:
+  RegisterReplica(uint32_t server_id, std::string hostname,
+                  std::string username, std::string password, uint16_t port,
+                  uint32_t replication_rank, uint32_t master_id)
+      : server_id_{server_id},
+        hostname_{std::move(hostname)},
+        username_{std::move(username)},
+        password_{std::move(password)},
+        port_{port},
+        replication_rank_{replication_rank},
+        master_id_{master_id} {}
+
+  [[nodiscard]] uint32_t server_id() const { return server_id_; }
+  [[nodiscard]] std::string hostname() const { return hostname_; }
+  [[nodiscard]] std::string username() const { return username_; }
+  [[nodiscard]] std::string password() const { return password_; }
+  [[nodiscard]] uint16_t port() const { return port_; }
+  [[nodiscard]] uint32_t replication_rank() const { return replication_rank_; }
+  [[nodiscard]] uint32_t master_id() const { return master_id_; }
+
+ private:
+  uint32_t server_id_;
+  std::string hostname_;
+  std::string username_;
+  std::string password_;
+  uint16_t port_;
+  uint32_t replication_rank_;
+  uint32_t master_id_;
+};
+
+}  // namespace classic_protocol::message::client
 
 #endif
